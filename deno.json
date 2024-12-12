@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "lib": [
+            "deno.window",
+            "dom",
+            "deno.ns"
+        ],
+        "noImplicitOverride": false
+    },
+    "tasks": {
+        "dev": "lost build --watch",
+        "build": "lost build",
+        "serve": "lost serve"
+    },
+    "imports": {
+        "@Runtime/": "./Addon/",
+        "@Editor/": "./Editor/"
+    }
+}

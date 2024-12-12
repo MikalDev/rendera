@@ -1,0 +1,1 @@
+{"version":3,"file":"GPUResourceCache.d.ts","sourceRoot":"","sources":["../src/GPUResourceCache.ts"],"names":[],"mappings":"AAAA,qBAAa,gBAAiB,YAAW,iBAAiB;IACtD,OAAO,CAAC,EAAE,CAAyB;IAEnC,OAAO,CAAC,WAAW,CAKH;gBAEJ,EAAE,EAAE,sBAAsB;IAItC,cAAc;IAuBd,gBAAgB;CAWnB"}

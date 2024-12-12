@@ -1,0 +1,97 @@
+{
+	"LostPlugin": {
+		"prefix": "!plugin",
+		"body": [
+			"import { defineAddon, Plugin, Property } from 'jsr:@lost-c3/lib${1:@Version}';",
+			"import type { EditorInstance } from '@Editor/Instance.ts';",
+			"import type { EditorType } from '@Editor/Type.ts';",
+			"import config from './lost.config.ts';",
+			"",
+			"",
+			"export default defineAddon(",
+			"    new Plugin<EditorInstance, EditorType>(config)",
+			"        /** @Properties */",
+			"        ${2:}",
+			")"
+		],
+		"description": "Creates structure for 'addon.ts' file for 'plugin' addon type"
+	},
+	"LostBehavior": {
+		"prefix": "!plugin",
+		"body": [
+			"import { defineAddon, Behavior, Property } from 'jsr:@lost-c3/lib${1:@Version}';",
+			"import config from './lost.config.ts';",
+			"",
+			"",
+			"export default defineAddon(",
+			"    new Behavior(config)",
+			"        /** @Properties */",
+			"        ${2:}",
+			")"
+		],
+		"description": "Creates structure for 'addon.ts' file for 'behavior' addon type"
+	},
+	"LostCategory": {
+		"prefix": "!cc",
+		"body": [
+			"import { Category, Action, Condition, Expression, addParam, Param } from 'jsr:@lost-c3/lib${1:@Version}';",
+			"import type { Instance } from '../Instance.ts';",
+			"",
+			"@Category('${2:categoryId}', '${3:Category Name}')",
+			"export default class {",
+			"    /** @Actions */",
+			"    ${4:}",
+			"    /** @Conditions */",
+			"    ${5:}",
+			"    /** @Expressions */",
+			"    ${6:}",
+			"}",
+		],
+		"description": "Creates empty category structure"
+	},
+	"LostAction": {
+		"prefix": "!ea",
+		"body": [
+			"@Action(",
+			"    `${1:id}`,",
+			"    `${2:name}`,",
+			"    `${3:displayText}`,",
+			"    `${4:description}`, {",
+			"        params: [${5:}]",
+			"})",
+			"${1:doAction}(this: Instance, ${6:params}: ${7:type}) {",
+			"    ${8:}",
+			"};"
+		],
+		"description": "Creates action entity"
+	},
+	"LostCondition": {
+		"prefix": "!ec",
+		"body": [
+			"@Condition(",
+			"    `${1:id}`,",
+			"    `${2:name}`,",
+			"    `${3:displayText}`,",
+			"    `${4:description}`, {",
+			"        isTrigger: ${5:true}",
+			"})",
+			"${1:onCondition}(this: Instance) { return ${6:true} };"
+		],
+		"description": "Creates condition entity"
+	},
+	"LostExpression": {
+		"prefix": "!ee",
+		"body": [
+			"@Expression(",
+			"    `${1:id}`,",
+			"    `${1:nameAndDisplayText}`,",
+			"    `${2:description}`, {",
+			"         returnType: '${3:string}'",
+			"})",
+			"${1:Expression}(this: Instance) {",
+			"    return '${4:}';",
+			"};"
+		],
+		"description": "Creates expression entity"
+	}
+}

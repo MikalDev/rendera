@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Model Loader Test</title>
+    <style>
+        canvas {
+            border: 1px solid #000;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas" width="800" height="600"></canvas>
+    <script type="module">
+        // @ts-check
+        import { ModelLoader, GPUResourceManager, InstanceManager } from './dist/index.js';
+
+        console.log('ModelLoader', ModelLoader);
+
+        // Get WebGL context
+        const canvas = document.getElementById('glCanvas');
+        if (canvas) canvas.style.backgroundColor = '#101020';
+        // @ts-ignore
+        const gl = canvas.getContext('webgl2');
+        
+        if (!gl) {
+            alert('WebGL2 not supported in this browser!');
+            throw new Error('WebGL2 not supported');
+        }
+
+        // Initialize managers
+        const gpuResourceManager = new GPUResourceManager(gl);
+        const modelLoader = new ModelLoader(gl, gpuResourceManager);
+        const instanceManager = new InstanceManager(gl, modelLoader, gpuResourceManager);
+
+        // Initialize webgl2 for rendering and texture handling
+        instanceManager.initialize();
+
+        // Load model
+        // @ts-ignore
+        // const modelPath = './test/assets/RiggedSimple.glb';
+        // const modelPath = './test/assets/BoxAnimated.glb';
+        const modelPath = './test/assets/cleric-t.glb';
+        const modelPath3 = './test/assets/animated-cube.glb';
+        const modelPath4 = './test/assets/c-bio-t.glb';
+        // const modelPath = './test/assets/c-bio.glb';
+        const modelPath5 = './test/assets/c-bug-t.glb';
+        // const modelPath = './test/assets/CompareNormal.glb';
+        // @ts-ignore
+        await new Promise(resolve => setTimeout(resolve, 500));
+        // @ts-ignore
+        const model = await modelLoader.loadModel(modelPath);
+        console.info('Model loaded successfully:', model.id, modelPath);
+        // @ts-ignore
+        const model3 = await modelLoader.loadModel(modelPath3);
+        console.info('Model3 loaded successfully:', model3.id, modelPath3);
+        // @ts-ignore
+        const model4 = await modelLoader.loadModel(modelPath4);
+        console.info('Model4 loaded successfully:', model4.id, modelPath4);
+        // @ts-ignore
+        const model5 = await modelLoader.loadModel(modelPath5);
+        console.info('Model5 loaded successfully:', model5.id, modelPath5);
+        
+        // Create instance
+        const instance = instanceManager.createModel(model.id);
+        const instance2 = instanceManager.createModel(model.id);
+        const instance3 = instanceManager.createModel(model3.id);
+        const instance4 = instanceManager.createModel(model4.id);
+        const instance5 = instanceManager.createModel(model5.id);
+        //const instance3 = instanceManager.createModel(model.id);
+        instance.setRotation([ 0, 0.0, 0.0, 0 ]);
+        instance.setPosition(0, -100, 0);
+        instance.setScale(50, 50, 50);
+
+        instance2.setRotation([0.0, 0.0, 0.0, 1.0]);
+        instance2.setPosition(50, -100, 0);
+        instance2.setScale(30, 30, 30);
+
+        instance3.setRotation([0.0, 0.0, 0.0, 1.0]);
+        instance3.setPosition(-100, 0, 0);
+        instance3.setScale(50, 50, 50);
+
+        instance4.setRotation([0.0, 0.0, 0.0, 1.0]);
+        instance4.setPosition(100, -100, 0);
+        instance4.setScale(100, 100, 100);
+
+        instance5.setRotation([0.707, 0.0, 0.0, 0.707]);
+        instance5.setPosition(0, 0, 0);
+        instance5.setScale(0.2, 0.2, 0.2);
+
+        console.log('Instance set');
+        gpuResourceManager.updateLight(0, {
+            type: 'point',
+            enabled: true,
+            position: [0, 10, 400],
+            color: [1.0, 1.0, 1.0],
+            intensity: 1.0,
+            attenuation: 0.0000001
+        });
+        gpuResourceManager.updateLight(1, {
+            type: 'spot',
+            enabled: true,
+            position: [-100, 30, 400],
+            color: [1.0, 0, 0],
+            intensity: 4.0,
+            attenuation: 0.0000001,
+            direction: [0, 0, -1],
+            spotAngle: 0.99,
+            spotPenumbra: 0.00
+        });
+        gpuResourceManager.updateLight(2, {
+            type: 'spot',
+            enabled: true,
+            position: [100, 30, 400],
+            color: [0.0, 0, 1.0],
+            intensity: 4.0,
+            attenuation: 0.0000001,
+            direction: [0, 0, -1],
+            spotAngle: 0.99,
+            spotPenumbra: 0.001
+        });
+        gpuResourceManager.updateLight(3, {
+            type: 'spot',
+            enabled: true,
+            position: [0, 30, 400],
+            color: [0.0, 1.0, 0.0],
+            intensity: 4.0,
+            attenuation: 0.0000001,
+            direction: [0, 0, -1],
+            spotAngle: 0.99,
+            spotPenumbra: 0.001
+        });
+        gpuResourceManager.updateCameraPosition([20, 20, 300]);
+    
+        // Create view projection matrix
+        // @ts-ignore
+        const viewProjection = instanceManager.createViewProjection(60, { width: canvas.width, height: canvas.height }, 0.1, 1000, [0, 0, 300], [0, 0, 0], [0, 1, 0]);
+
+        // Render
+        instanceManager.render(viewProjection);
+
+        let rotation = 0;
+        let normalMapEnabled = false;
+
+        // Add event listener outside the render loop
+        document.addEventListener('keydown', (event) => {
+            if (event.key.toLowerCase() === 'n') {
+                normalMapEnabled = !normalMapEnabled;
+                if (instance.setNormalMapEnabled) {
+                    instance.setNormalMapEnabled(normalMapEnabled);
+                    instance2.setNormalMapEnabled(normalMapEnabled);
+                    instance3.setNormalMapEnabled(normalMapEnabled);
+                } else {
+                    console.warn('Normal map toggling is not supported for this instance', instance);
+                }
+                console.log('Normal map enabled:', normalMapEnabled);
+            }
+        });
+
+        instance3.playAnimation('animation_AnimatedCube', {loop: true});
+        instance.playAnimation('Walk', {loop: true});
+        instance2.playAnimation('Spell1', {loop: true});
+        instance5.playAnimation('Armature|Take 001|BaseLayer.001', {loop: true});
+        // instance.playAnimation('', {loop: true});
+
+        // Create render loop
+        function render() {
+            // Animate the instance
+            instance.updateAnimation(0.007);
+            instance2.updateAnimation(0.008);
+            instance3.updateAnimation(0.001);
+            instance5.updateAnimation(0.01);
+            rotation += 0.01;
+            /*
+            instance.setQuaternion(
+                0,                    // X component
+                Math.sin(rotation/2), // Y component 
+                0,                    // Z component
+                Math.cos(rotation/2)  // W component
+            );            
+            */
+
+            // Clear and render scene
+            instanceManager.render(viewProjection);
+
+            //instance3.setQuaternion(
+            //    0,                    // X component
+            //    Math.sin(rotation/2), // Y component 
+            //    0,                    // Z component
+            //    Math.cos(rotation/2)  // W component
+            //);
+            //instance2.setQuaternion(
+            //    0,                    // X component
+            //    Math.cos(rotation/2), // Y component 
+            //    0,                    // Z component
+            //    Math.sin(rotation/2)  // W component
+            //);
+            /*
+            instance2.setQuaternion(
+                Math.sin(rotation/2) * Math.cos(rotation/2), // X component
+                -Math.sin(rotation/2),                        // Y component
+                0,                                           // Z component
+                -Math.cos(rotation/2) * Math.cos(rotation/2)  // W component
+            );
+            */
+
+            // Request next frame
+            requestAnimationFrame(render);
+        }
+
+        // Start render loop
+        render();
+
+        // Clean up
+        window.addEventListener('beforeunload', () => {
+            gpuResourceManager.dispose();
+        });
+    </script>
+</body>
+</html>

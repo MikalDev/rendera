@@ -1,0 +1,40 @@
+.addon_base
+Source
+construct.d.ts
+
+# Dependencies
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Node
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+.next/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Coverage directory used by testing tools
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
