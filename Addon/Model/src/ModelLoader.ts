@@ -77,14 +77,12 @@ export class ModelLoader implements IModelLoader {
     }
 
     async processPendingDocuments(): Promise<number> {
-        console.log('[rendera] ModelLoader **********', this.pendingDocuments.size);
         const pendingDocuments = this.pendingDocuments;
         if (pendingDocuments.size === 0) return 0;
         console.log('[rendera] ModelLoader: processPendingDocuments', this.pendingDocuments.size);
         let count = 0;
 		for (const [id, _document] of pendingDocuments.entries()) {
 			const modelId: ModelId = { id };
-            debugger
 			await this.processModel(modelId);
 			count++;
 			console.info('[rendera] processFiles', modelId.id);

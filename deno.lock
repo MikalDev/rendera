@@ -6,6 +6,7 @@
     "jsr:@lost-c3/lib@3.2.4": "3.2.4",
     "jsr:@lost-c3/lib@3.3.0": "3.3.0",
     "jsr:@lost-c3/lib@3.3.1": "3.3.1",
+    "jsr:@lost-c3/lib@3.3.2": "3.3.2",
     "jsr:@std/cli@1.0.6": "1.0.6",
     "jsr:@std/fmt@1.0.2": "1.0.2",
     "jsr:@std/fs@1": "1.0.6",
@@ -78,6 +79,20 @@
     },
     "@lost-c3/lib@3.3.1": {
       "integrity": "6caa6ca06602b9a4d1b3268fb1186a379ffc752329ab286a4d8423fd53fcf83f",
+      "dependencies": [
+        "jsr:@std/cli",
+        "jsr:@std/fmt",
+        "jsr:@std/fs",
+        "jsr:@std/path@1.0.6",
+        "jsr:@std/path@1.0.8",
+        "jsr:@ts-morph/ts-morph",
+        "jsr:@zip-js/zip-js",
+        "npm:ts-md5",
+        "npm:uglify-js"
+      ]
+    },
+    "@lost-c3/lib@3.3.2": {
+      "integrity": "8297c3abfebff7355d444d12f82854d69d4cc09f9ab03cbb9b0be5055a85d22a",
       "dependencies": [
         "jsr:@std/cli",
         "jsr:@std/fmt",

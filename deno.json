@@ -15,7 +15,8 @@
         "bp-old": "lost build && deno run --allow-read --allow-write Tools/post-build.ts",
         "bp-build": "lost build",
         "bp-post": "deno run --allow-read --allow-write Tools/post-build.ts",
-        "bp": "deno run --allow-run --allow-read --allow-write Tools/build-and-post.ts"
+        "bp": "deno run --allow-run --allow-read --allow-write Tools/build-and-post.ts",
+        "update": "deno install --name lost jsr:@lost-c3/lib@3.3.2/cli --global -f -A"
     },
     "imports": {
         "@Runtime/": "./Addon/",

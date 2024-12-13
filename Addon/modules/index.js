@@ -13598,7 +13598,6 @@ class ModelLoader {
         return this._pendingDocuments;
     }
     async processPendingDocuments() {
-        console.log('[rendera] ModelLoader **********', this.pendingDocuments.size);
         const pendingDocuments = this.pendingDocuments;
         if (pendingDocuments.size === 0)
             return 0;
@@ -13606,7 +13605,6 @@ class ModelLoader {
         let count = 0;
         for (const [id, _document] of pendingDocuments.entries()) {
             const modelId = { id };
-            debugger;
             await this.processModel(modelId);
             count++;
             console.info('[rendera] processFiles', modelId.id);
