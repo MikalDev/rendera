@@ -26,11 +26,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 */
-(function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
-  typeof define === 'function' && define.amd ? define(['exports'], factory) :
-  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.glMatrix = {}));
-})(this, (function (exports) { 'use strict';
+'use strict';
 
   /**
    * Common utilities
@@ -7844,17 +7840,4 @@ THE SOFTWARE.
     forEach: forEach
   });
 
-  exports.glMatrix = common;
-  exports.mat2 = mat2;
-  exports.mat2d = mat2d;
-  exports.mat3 = mat3;
-  exports.mat4 = mat4;
-  exports.quat = quat;
-  exports.quat2 = quat2;
-  exports.vec2 = vec2;
-  exports.vec3 = vec3;
-  exports.vec4 = vec4;
-
-  Object.defineProperty(exports, '__esModule', { value: true });
-
-}));
+export { mat4, mat3, vec4, vec3, vec2, quat, mat2, mat2d }

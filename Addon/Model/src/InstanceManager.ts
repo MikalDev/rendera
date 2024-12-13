@@ -182,7 +182,7 @@ export class InstanceManager implements IInstanceManager {
         if (runtime) {
             renderer = runtime.GetWebGLRenderer();
             renderer.EndBatch();
-        }.
+        }
         // renderer.EndBatch()
         this.gpuResources.gpuResourceCache.cacheModelMode();
         for (const [modelId, instanceGroup] of this.instancesByModel) {

@@ -16,3 +16,11 @@ Use `lost create --plugin` -->
     - change import of glMatrix to use named imports
         - import { mat4 } from './modules/gl-matrix.js';
     - change runtime to use WebGLRenderer instead of WebGL2Renderer
+
+    main.js
+    import "./plugin.js"
+    import "./type.js"
+    import "./instance.js"
+    import "./actions.js"
+    import "./conditions.js"
+    import "./expressions.js"
