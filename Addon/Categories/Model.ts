@@ -1,4 +1,4 @@
-import { Category, Action, Condition, Expression, addParam, Param } from 'jsr:@lost-c3/lib@3.3.0';
+import { Category, Action, Condition, Expression, addParam, Param } from 'jsr:@lost-c3/lib@3.3.2';
 // import type { Instance } from '@Instance';
 import type { Instance } from '../Instance.ts';
 
@@ -25,14 +25,14 @@ export default class ModelCategory {
     }
 
     /** @Conditions */
-    @Condition('onCondition', 'On condition', 'On condition')
-    onCondition() {
-        return false;
-    }
+    // @Condition('onCondition', 'On condition', 'On condition')
+    // onCondition() {
+    //     return false;
+    // }
 
     /** @Expressions */
-    @Expression('expression', 'Expression')
-    Expression() {
-        return 'Value';
-    }
+    //@Expression('expression', 'Expression')
+    //Expression() {
+    //    return 'Value';
+    //}
 }
