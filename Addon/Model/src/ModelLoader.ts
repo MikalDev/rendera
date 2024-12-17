@@ -566,3 +566,5 @@ export class ModelLoader implements IModelLoader {
         };
     }
 }
+
+globalThis.ModelLoader = ModelLoader;

@@ -653,3 +653,5 @@ export class ShaderSystem {
         this.programs.forEach(program => this.gl.deleteProgram(program));
     }
 }
+
+globalThis.GPUResourceManager = GPUResourceManager;

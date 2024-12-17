@@ -806,7 +806,7 @@ class GraphNode extends EventDispatcher {
  * Current version of the package.
  * @hidden
  */
-const VERSION = `v${"4.1.0"}`;
+const VERSION = `v${"4.1.1"}`;
 /** @hidden */
 const GLB_BUFFER = '@glb.bin';
 /** String IDs for core {@link Property} types. */
@@ -6102,7 +6102,9 @@ class GLTFWriter {
           // (1) Interleaved vertex attributes.
           const result = interleaveAccessors(groupAccessors, bufferIndex, bufferByteLength);
           bufferByteLength += result.byteLength;
-          buffers.push(...result.buffers);
+          for (const _buffer of result.buffers) {
+            buffers.push(_buffer);
+          }
         } else if (usage === BufferViewUsage.ARRAY_BUFFER) {
           // (2) Non-interleaved vertex attributes.
           for (const accessor of groupAccessors) {
@@ -6110,24 +6112,32 @@ class GLTFWriter {
             // 4-byte boundaries, which concatAccessors() does not.
             const result = interleaveAccessors([accessor], bufferIndex, bufferByteLength);
             bufferByteLength += result.byteLength;
-            buffers.push(...result.buffers);
+            for (const _buffer2 of result.buffers) {
+              buffers.push(_buffer2);
+            }
           }
         } else if (usage === BufferViewUsage.SPARSE) {
           // (3) Sparse accessors.
           const result = concatSparseAccessors(groupAccessors, bufferIndex, bufferByteLength);
           bufferByteLength += result.byteLength;
-          buffers.push(...result.buffers);
+          for (const _buffer3 of result.buffers) {
+            buffers.push(_buffer3);
+          }
         } else if (usage === BufferViewUsage.ELEMENT_ARRAY_BUFFER) {
           // (4) Indices.
           const target = WriterContext.BufferViewTarget.ELEMENT_ARRAY_BUFFER;
           const result = concatAccessors(groupAccessors, bufferIndex, bufferByteLength, target);
           bufferByteLength += result.byteLength;
-          buffers.push(...result.buffers);
+          for (const _buffer4 of result.buffers) {
+            buffers.push(_buffer4);
+          }
         } else {
           // (5) Other.
           const result = concatAccessors(groupAccessors, bufferIndex, bufferByteLength);
           bufferByteLength += result.byteLength;
-          buffers.push(...result.buffers);
+          for (const _buffer5 of result.buffers) {
+            buffers.push(_buffer5);
+          }
         }
       }
       // We only support embedded images in GLB, where the embedded buffer must be the first.
@@ -8594,8 +8604,10 @@ class KHRDracoMeshCompression extends Extension {
       accessorDefs.push(indicesDef);
       // In rare cases Draco increases vertex count, requiring a larger index component type.
       // https://github.com/donmccurdy/glTF-Transform/issues/1370
-      if (encodedPrim.numVertices > 65534 && indicesDef.componentType !== Accessor.ComponentType.UNSIGNED_INT) {
+      if (encodedPrim.numVertices > 65534 && Accessor.getComponentSize(indicesDef.componentType) <= 2) {
         indicesDef.componentType = Accessor.ComponentType.UNSIGNED_INT;
+      } else if (encodedPrim.numVertices > 254 && Accessor.getComponentSize(indicesDef.componentType) <= 1) {
+        indicesDef.componentType = Accessor.ComponentType.UNSIGNED_SHORT;
       }
       // Create attribute definitions, update count.
       for (const semantic of prim.listSemantics()) {
@@ -8653,7 +8665,7 @@ class KHRDracoMeshCompression extends Extension {
 KHRDracoMeshCompression.EXTENSION_NAME = NAME$j;
 /**
  * Compression method. `EncoderMethod.EDGEBREAKER` usually provides a higher compression ratio,
- * while `EncoderMethod.SEQUENTIAL` better preserves original verter order.
+ * while `EncoderMethod.SEQUENTIAL` better preserves original vertex order.
  */
 KHRDracoMeshCompression.EncoderMethod = EncoderMethod;
 function listDracoPrimitives(doc) {
@@ -13997,6 +14009,7 @@ class ModelLoader {
         };
     }
 }
+globalThis.ModelLoader = ModelLoader;
 
 class GPUResourceCache {
     constructor(gl) {
@@ -14576,6 +14589,7 @@ class ShaderSystem {
         this.programs.forEach(program => this.gl.deleteProgram(program));
     }
 }
+globalThis.GPUResourceManager = GPUResourceManager;
 
 class Model {
     constructor(instanceId, manager) {
@@ -15278,5 +15292,6 @@ class InstanceManager {
         return this._animationController;
     }
 }
+globalThis.InstanceManager = InstanceManager;
 
 export { GPUResourceCache, GPUResourceManager, InstanceManager, ModelLoader };

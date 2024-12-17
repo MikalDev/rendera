@@ -455,3 +455,5 @@ export class InstanceManager implements IInstanceManager {
         return this._animationController;
     }
 }
+
+globalThis.InstanceManager = InstanceManager;
