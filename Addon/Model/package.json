@@ -16,8 +16,9 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@gltf-transform/core": "^4.1.0",
-    "@gltf-transform/extensions": "^4.1.0",
+    "@gltf-transform/core": "^4.1.1",
+    "@gltf-transform/extensions": "^4.1.1",
+    "@gltf-transform/functions": "^4.1.1",
     "gl-matrix": "^3.4.3",
     "workerpool": "^9.2.0"
   },

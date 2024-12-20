@@ -35,11 +35,12 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	}
 
 	public initialize(): boolean {
-		if (this.initialized) return true;
+		if (this.initialized)
+			return true;
 		// @ts-ignore
-		const runtime = globalThis.veryBadLands
-		const gl = runtime.GetWebGLRenderer()._gl;
-		console.log('[rendera] WebGL2 supported', gl);
+		const renderer = globalThis.verySadLands;
+		const gl = renderer._gl;
+		console.log('[rendera] WebGL2 supported', gl);;
 		// Initialize managers
 		this.gpuResourceManager = new GPUResourceManager(gl);
 		this.modelLoader = new ModelLoader(gl, this.gpuResourceManager);

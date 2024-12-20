@@ -1,10 +1,6 @@
 class RenderaPlugin extends globalThis.ISDKPluginBase {
 	constructor() {
 		super();
-		// @ts-ignore
-		globalThis.veryBadLands = c3_runtimeInterface._localRuntime
-		// @ts-ignore
-		console.log('[runtime] veryBadLands', globalThis.veryBadLands);
 	}
 };
 

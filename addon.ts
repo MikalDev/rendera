@@ -6,7 +6,12 @@ import config from './lost.config.ts';
 
 export default defineAddon(
     new Plugin<EditorInstance, EditorType>(config)
-    .setRuntimeScripts("index.js")
+    .setRuntimeScripts(
+        {
+            type: "file",
+            path: "Scripts/init.js",
+        }
+    )
     /** @Properties */
         
 )
