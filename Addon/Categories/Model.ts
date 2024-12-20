@@ -1,4 +1,4 @@
-import { Category, Action, Condition, Expression, addParam, Param } from 'jsr:@lost-c3/lib@3.3.2';
+import { Category, Action, Condition, Expression, addParam, Param } from 'jsr:@lost-c3/lib@3.3.3';
 // import type { Instance } from '@Instance';
 import type { Instance } from '../Instance.ts';
 
