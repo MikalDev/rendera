@@ -128,6 +128,7 @@ export interface IModelLoader {
     getModelData(modelId: string): ModelData | null;
     deleteModel(modelId: string): void;
     generateModelId(url: string): ModelId;
+    initialized: boolean;
 }
 
 export interface IGPUResourceCache {

@@ -9,7 +9,7 @@ export default defineAddon(
     .setRuntimeScripts(
         {
             type: "file",
-            path: "Scripts/init.js",
+            path: "init.js",
         }
     )
     /** @Properties */

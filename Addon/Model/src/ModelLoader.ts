@@ -11,6 +11,8 @@ export class ModelLoader implements IModelLoader {
     private gpuResources: IGPUResourceManager;
     private webio!: WebIO;
     private _pendingDocuments = new Map<string, Document>();
+    private _modelsLoading = new Map<string, boolean>();
+    public initialized: boolean = false;
 
     constructor(gl: WebGL2RenderingContext, gpuResources: IGPUResourceManager) {
         this.gl = gl;
@@ -26,19 +28,34 @@ export class ModelLoader implements IModelLoader {
             .registerDependencies({
                 'draco3d.decoder': dracoDecoder
             });
+        this.initialized = true;
     }
 
-    async loadModel(modelPath: string): Promise<ModelData> {
-        await this.readDocument(modelPath);
+    async loadModel(modelPath: string, blobGLB: Blob | null = null): Promise<ModelData> {
+        if (this._modelsLoading.has(modelPath)) {
+            console.warn('[rendera] ModelLoader: loadModel - model already loading', modelPath);
+            return {id: modelPath};
+        }
+        this._modelsLoading.set(modelPath, true);
+        await this.readDocument(modelPath, blobGLB);
         await this.processPendingDocuments();
+        this._modelsLoading.delete(modelPath);
         return {id: modelPath};
     }
 
-    async readDocument(url: string): Promise<boolean> {
+    async readDocument(modelPath: string, blobGLB: Blob): Promise<boolean> {
         try {
-            const document = await this.webio.read(url);
-            console.info('[rendera] ModelLoader: read', url);
-            this._pendingDocuments.set(url, document);
+            let document;
+            if (blobGLB) {
+                // Convert Blob to ArrayBuffer
+                const arrayBuffer = await blobGLB.arrayBuffer();
+                document = await this.webio.readBinary(new Uint8Array(arrayBuffer));
+            } else {
+                document = await this.webio.read(modelPath);
+            }
+            
+            console.info('[rendera] ModelLoader: read', modelPath);
+            this._pendingDocuments.set(modelPath, document);
             return true;
         } catch (error) {
             throw this.createModelError(ModelErrorCode.LOAD_FAILED, `Failed to read document: ${error}`);
@@ -47,6 +64,10 @@ export class ModelLoader implements IModelLoader {
 
     hasModel(modelId: ModelId): boolean {
         return this.loadedModels.has(modelId.id);
+    }
+
+    modelLoading(modelId: ModelId): boolean {
+        return this._modelsLoading.has(modelId.id);
     }
 
     async processModel(modelId: ModelId): Promise<boolean> {

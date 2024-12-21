@@ -13555,6 +13555,8 @@ class ModelLoader {
     constructor(gl, gpuResources) {
         this.loadedModels = new Map();
         this._pendingDocuments = new Map();
+        this._modelsLoading = new Map();
+        this.initialized = false;
         this.gl = gl;
         this.gpuResources = gpuResources;
         this.createWebIO();
@@ -13567,17 +13569,32 @@ class ModelLoader {
             .registerDependencies({
             'draco3d.decoder': dracoDecoder
         });
+        this.initialized = true;
     }
-    async loadModel(modelPath) {
-        await this.readDocument(modelPath);
+    async loadModel(modelPath, blobGLB = null) {
+        if (this._modelsLoading.has(modelPath)) {
+            console.warn('[rendera] ModelLoader: loadModel - model already loading', modelPath);
+            return { id: modelPath };
+        }
+        this._modelsLoading.set(modelPath, true);
+        await this.readDocument(modelPath, blobGLB);
         await this.processPendingDocuments();
+        this._modelsLoading.delete(modelPath);
         return { id: modelPath };
     }
-    async readDocument(url) {
+    async readDocument(modelPath, blobGLB) {
         try {
-            const document = await this.webio.read(url);
-            console.info('[rendera] ModelLoader: read', url);
-            this._pendingDocuments.set(url, document);
+            let document;
+            if (blobGLB) {
+                // Convert Blob to ArrayBuffer
+                const arrayBuffer = await blobGLB.arrayBuffer();
+                document = await this.webio.readBinary(new Uint8Array(arrayBuffer));
+            }
+            else {
+                document = await this.webio.read(modelPath);
+            }
+            console.info('[rendera] ModelLoader: read', modelPath);
+            this._pendingDocuments.set(modelPath, document);
             return true;
         }
         catch (error) {
@@ -13586,6 +13603,9 @@ class ModelLoader {
     }
     hasModel(modelId) {
         return this.loadedModels.has(modelId.id);
+    }
+    modelLoading(modelId) {
+        return this._modelsLoading.has(modelId.id);
     }
     async processModel(modelId) {
         const document = this._pendingDocuments.get(modelId.id);

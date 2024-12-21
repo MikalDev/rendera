@@ -6,10 +6,12 @@
   "scripts": {
     "test": "http-server ./ -p 8080 --cors -c-1",
     "build-clean": "rimraf dist",
+    "build-clean-modules": "rimraf ../modules",
     "build-dist": "rollup -c",
     "watch": "rollup -c -w",
     "copy": "copyfiles -u 1 \"dist/**/*\" ../modules",
-    "build": "npm run build-clean && npm run build-dist && npm run copy"
+    "copy-gl-matrix": "copyfiles -u 1 src/gl-matrix.js ../modules/",
+    "build": "npm run build-clean && npm run build-clean-modules && npm run build-dist && npm run copy && npm run copy-gl-matrix"
   },
   "keywords": [],
   "author": "",

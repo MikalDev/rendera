@@ -15,7 +15,7 @@ try {
 
     // Reorder the file-list array
     addonData['file-list'] = [
-        "c3runtime/init.js",
+        "scripts/init.js",
         "c3runtime/main.js",
         "c3runtime/plugin.js",
         "c3runtime/type.js",

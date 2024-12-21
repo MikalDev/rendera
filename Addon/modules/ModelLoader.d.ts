@@ -6,11 +6,14 @@ export declare class ModelLoader implements IModelLoader {
     private gpuResources;
     private webio;
     private _pendingDocuments;
+    private _modelsLoading;
+    initialized: boolean;
     constructor(gl: WebGL2RenderingContext, gpuResources: IGPUResourceManager);
     private createWebIO;
-    loadModel(modelPath: string): Promise<ModelData>;
-    readDocument(url: string): Promise<boolean>;
+    loadModel(modelPath: string, blobGLB?: Blob | null): Promise<ModelData>;
+    readDocument(modelPath: string, blobGLB: Blob): Promise<boolean>;
     hasModel(modelId: ModelId): boolean;
+    modelLoading(modelId: ModelId): boolean;
     processModel(modelId: ModelId): Promise<boolean>;
     get pendingDocuments(): Map<string, Document>;
     processPendingDocuments(): Promise<number>;
