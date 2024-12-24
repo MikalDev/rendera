@@ -136,9 +136,9 @@ export class InstanceManager implements IInstanceManager {
                 speed: 1,
                 loop: true,
                 playing: false,
-                animationMatrices: new WeakMap<Node, mat4>(),
-                animationNodeTransforms: new WeakMap<Node, NodeTransforms>(),
-                boneMatrices: new WeakMap<Node, Float32Array>()
+                animationMatrices: new Map<number, mat4>(),
+                animationNodeTransforms: new Map<number, NodeTransforms>(),
+                boneMatrices: new Map<number, Float32Array>()
             },
             worldMatrix: new Float32Array(16) // 4x4 matrix
         };
@@ -350,7 +350,7 @@ export class InstanceManager implements IInstanceManager {
                     this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;
-                    const animationMatrix = animationMatrices.get(renderableNode.node);
+                    const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
                     if (nodeMatrixLoc) {
                         if (animationMatrix) {
                             this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix);
@@ -361,7 +361,7 @@ export class InstanceManager implements IInstanceManager {
 
                     let noBoneMatrices = true;
                     if (nodeBonesMatricesLoc) {
-                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node);
+                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
                         if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
                             this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
                             noBoneMatrices = false;
@@ -374,7 +374,7 @@ export class InstanceManager implements IInstanceManager {
                     // Calculate normal matrix (inverse transpose of the upper 3x3 model matrix)
                     const normalMatrix = mat3.create();
                     // Get nodeMatrix from instance from animation matrices
-                    const nodeMatrix = animationMatrices.get(renderableNode.node);
+                    const nodeMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
                     if (nodeMatrix) {
                         const nodeWorldMatrix = mat4.create();
                         mat4.multiply(nodeWorldMatrix, nodeMatrix, instance.worldMatrix);

@@ -58,6 +58,7 @@ export declare class ModelLoader implements IModelLoader {
         }[];
         jointData: import("./types").JointData[];
         rootNode: Node;
+        nodeArray?: Node[];
     };
 }
 //# sourceMappingURL=ModelLoader.d.ts.map

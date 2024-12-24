@@ -164,18 +164,42 @@ export class ModelLoader implements IModelLoader {
 
     private async processRenderableNodes(document: Document, modelData: ModelData): Promise<void> {
         const scene = document.getRoot().listScenes()[0];
+        const allNodes: Node[] = [];
+        let currentNodeIndex = 0;
+
+        // First pass: collect all nodes and assign indices
         scene.traverse(node => {
+            (node as any).nodeIndex = currentNodeIndex++;
+            allNodes.push(node);
+        });
+
+        // Second pass: assign parent and children indices
+        scene.traverse(node => {
+            const parentNode = node.getParentNode();
+            const children = node.listChildren();
+            
+            const indexData = {
+                nodeIndex: (node as any).nodeIndex,
+                parentIndex: parentNode ? (parentNode as any).nodeIndex : null,
+                childrenIndices: children.map(child => (child as any).nodeIndex)
+            };
+
+            // Attach the data to the node
+            (node as any).indexData = indexData;
+
             const mesh = node.getMesh();
             if (mesh) {
                 const modelMesh = this.processMesh(mesh, document);
-                console.log('ModelLoader: processRenderableNodes', node.getName(), !!node.getSkin());
                 modelData.renderableNodes.push({
                     node,
                     modelMesh,
-                    useSkinning: !!node.getSkin()
+                    useSkinning: !!node.getSkin(),
                 });
             }
         });
+
+        // Store the array of all nodes in the model data
+        modelData.nodeArray = allNodes;
     }
 
     private processMesh(mesh: Mesh, document: Document): ModelMesh {

@@ -65,7 +65,6 @@ class RendererAnalyzer {
 				// Convert function to string to analyze its content
 				const funcString = value.value.toString();
 				if (key == "FF") {
-					debugger
 				}
 				if (this.detectPattern(funcString)) {
 					this.endBatchName = key;

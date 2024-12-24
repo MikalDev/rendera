@@ -3,6 +3,7 @@ import { InstanceData, AnimationOptions } from './types';
 export declare class AnimationController {
     private modelLoader;
     constructor(modelLoader: ModelLoader);
+    private fastSceneTraverse;
     private updateNodeLocalTransforms;
     setBindPose(instance: InstanceData): void;
     private updateAnimationMatricesFromTransforms;

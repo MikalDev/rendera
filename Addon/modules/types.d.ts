@@ -32,9 +32,9 @@ export interface AnimationState {
     speed: number;
     blendFactor?: number;
     loop: boolean;
-    animationNodeTransforms: WeakMap<Node, NodeTransforms>;
-    animationMatrices: WeakMap<Node, mat4>;
-    boneMatrices: WeakMap<Node, Float32Array>;
+    animationNodeTransforms: Map<number, NodeTransforms>;
+    animationMatrices: Map<number, mat4>;
+    boneMatrices: Map<number, Float32Array>;
 }
 export interface NodeTransforms {
     rotation: vec4;
@@ -135,6 +135,7 @@ export interface ModelData {
         useSkinning: boolean;
     }[];
     materialSystem: MaterialSystem;
+    nodeArray?: Node[];
 }
 export interface JointData {
     index: number;

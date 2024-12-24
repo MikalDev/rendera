@@ -13690,18 +13690,36 @@ class ModelLoader {
     }
     async processRenderableNodes(document, modelData) {
         const scene = document.getRoot().listScenes()[0];
+        const allNodes = [];
+        let currentNodeIndex = 0;
+        // First pass: collect all nodes and assign indices
         scene.traverse(node => {
+            node.nodeIndex = currentNodeIndex++;
+            allNodes.push(node);
+        });
+        // Second pass: assign parent and children indices
+        scene.traverse(node => {
+            const parentNode = node.getParentNode();
+            const children = node.listChildren();
+            const indexData = {
+                nodeIndex: node.nodeIndex,
+                parentIndex: parentNode ? parentNode.nodeIndex : null,
+                childrenIndices: children.map(child => child.nodeIndex)
+            };
+            // Attach the data to the node
+            node.indexData = indexData;
             const mesh = node.getMesh();
             if (mesh) {
                 const modelMesh = this.processMesh(mesh, document);
-                console.log('ModelLoader: processRenderableNodes', node.getName(), !!node.getSkin());
                 modelData.renderableNodes.push({
                     node,
                     modelMesh,
-                    useSkinning: !!node.getSkin()
+                    useSkinning: !!node.getSkin(),
                 });
             }
         });
+        // Store the array of all nodes in the model data
+        modelData.nodeArray = allNodes;
     }
     processMesh(mesh, document) {
         const modelMesh = {
@@ -14655,13 +14673,34 @@ class AnimationController {
         this.modelLoader = modelLoader;
         this.modelLoader = modelLoader;
     }
+    fastSceneTraverse(scene, modelData, fcn) {
+        // Process root node first
+        // fcn(scene);
+        // Use a stack for iterative traversal (faster than recursion)
+        const stack = [];
+        // Push initial children indices
+        for (let i = scene.listChildren().length - 1; i >= 0; i--) {
+            const childNode = scene.listChildren()[i];
+            stack.push(childNode.indexData.nodeIndex);
+        }
+        // Process all nodes
+        while (stack.length > 0) {
+            const nodeIndex = stack.pop();
+            const node = modelData.nodeArray[nodeIndex];
+            fcn(node);
+            // Push children indices in reverse order (to process left to right when popping)
+            const children = node.listChildren();
+            for (let i = children.length - 1; i >= 0; i--) {
+                stack.push(children[i].indexData.nodeIndex);
+            }
+        }
+    }
     updateNodeLocalTransforms(instance) {
         const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
         if (!modelData)
             return;
         const nodeTransforms = instance.animationState.animationNodeTransforms;
-        const scene = modelData.scene;
-        scene.traverse(node => {
+        this.fastSceneTraverse(modelData.scene, modelData, (node) => {
             const nodeMatrix = node.getMatrix();
             let translation;
             let rotation;
@@ -14679,7 +14718,7 @@ class AnimationController {
                 rotation = node.getRotation() || create();
                 scale = node.getScale() || create$2();
             }
-            nodeTransforms.set(node, { translation, rotation, scale });
+            nodeTransforms.set(node.indexData.nodeIndex, { translation, rotation, scale });
         });
     }
     setBindPose(instance) {
@@ -14688,18 +14727,17 @@ class AnimationController {
         this.updateNodeHierarchyTransforms(instance);
     }
     updateAnimationMatricesFromTransforms(instance) {
-        var _a;
         const animationMatrices = instance.animationState.animationMatrices;
         const nodeTransforms = instance.animationState.animationNodeTransforms;
-        const scene = (_a = this.modelLoader.getModelData(instance.instanceId.modelId)) === null || _a === void 0 ? void 0 : _a.scene;
-        if (!scene)
+        const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
+        if (!(modelData === null || modelData === void 0 ? void 0 : modelData.scene))
             return;
-        scene.traverse(node => {
-            const transform = nodeTransforms.get(node);
+        this.fastSceneTraverse(modelData.scene, modelData, node => {
+            const transform = nodeTransforms.get(node.indexData.nodeIndex);
             if (transform) {
                 const animationMatrix = create$3();
                 fromRotationTranslationScale(animationMatrix, transform.rotation, transform.translation, transform.scale);
-                animationMatrices.set(node, animationMatrix);
+                animationMatrices.set(node.indexData.nodeIndex, animationMatrix);
             }
         });
     }
@@ -14743,23 +14781,21 @@ class AnimationController {
         const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
         if (!modelData)
             return;
-        const scene = modelData.scene;
-        scene.traverse(node => {
+        this.fastSceneTraverse(modelData.scene, modelData, node => {
             var _a, _b, _c;
             let parentMatrix;
-            // Get parent node
-            const parent = node.getParentNode();
-            if (parent !== null) {
-                parentMatrix = instance.animationState.animationMatrices.get(parent);
+            if (node.indexData.parentIndex !== null) {
+                const parent = modelData.nodeArray[node.indexData.parentIndex];
+                parentMatrix = instance.animationState.animationMatrices.get(parent.indexData.nodeIndex);
                 if (!parentMatrix) {
-                    console.warn(`Parent animation matrix not found for node ${node.getName()}`);
+                    console.warn('Parent matrix not found for node', node);
                     parentMatrix = create$3();
                 }
             }
             else {
                 parentMatrix = create$3();
             }
-            const nodeTransforms = instance.animationState.animationNodeTransforms.get(node);
+            const nodeTransforms = instance.animationState.animationNodeTransforms.get(node.indexData.nodeIndex);
             let animationMatrix = create$3();
             if (nodeTransforms) {
                 const rotation = (_a = nodeTransforms.rotation) !== null && _a !== void 0 ? _a : create();
@@ -14768,9 +14804,8 @@ class AnimationController {
                 fromRotationTranslationScale(animationMatrix, rotation, translation, scale);
             }
             multiply(animationMatrix, parentMatrix, animationMatrix);
-            instance.animationState.animationMatrices.set(node, animationMatrix);
+            instance.animationState.animationMatrices.set(node.indexData.nodeIndex, animationMatrix);
         });
-        // console.info(`Updated animation matrices for instance ${instance.instanceId.id}`);
     }
     maxDuration(animation) {
         let maxDuration = 0;
@@ -14808,7 +14843,7 @@ class AnimationController {
             const { startIndex, endIndex, factor } = this.findKeyframeIndices(input.getArray(), time);
             // Get interpolated value
             const value = this.interpolateValues(output.getArray(), startIndex, endIndex, factor, targetPath);
-            let nodeTransforms = animationState.animationNodeTransforms.get(targetNode);
+            let nodeTransforms = animationState.animationNodeTransforms.get(targetNode.indexData.nodeIndex);
             if (!nodeTransforms) {
                 console.warn(`Node transforms not found for node ${targetNode.getName()}`);
                 continue;
@@ -14831,9 +14866,7 @@ class AnimationController {
         const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
         if (!modelData)
             return;
-        const scene = modelData.scene;
-        instance.animationState.animationMatrices;
-        scene.traverse(node => {
+        this.fastSceneTraverse(modelData.scene, modelData, node => {
             const skin = node.getSkin();
             if (skin) {
                 this.updateBoneMatrices(node, instance);
@@ -14852,11 +14885,11 @@ class AnimationController {
             console.error(`Skin joints not found for node ${node.getName()}`);
             return;
         }
-        const nodeBoneMatrices = (_a = instance.animationState.boneMatrices.get(node)) !== null && _a !== void 0 ? _a : new Float32Array(skinJoints.length * 16);
+        const nodeBoneMatrices = (_a = instance.animationState.boneMatrices.get(node.indexData.nodeIndex)) !== null && _a !== void 0 ? _a : new Float32Array(skinJoints.length * 16);
         // Create node inverse matrix
         const animationMatrices = instance.animationState.animationMatrices;
         const nodeInverseMatrix = create$3();
-        const nodeAnimationMatrix = animationMatrices.get(node);
+        const nodeAnimationMatrix = animationMatrices.get(node.indexData.nodeIndex);
         if (!nodeAnimationMatrix) {
             console.error(`Animation matrix not found for node ${node.getName()}`);
             return;
@@ -14869,7 +14902,7 @@ class AnimationController {
         }
         for (let jj = 0; jj < skinJoints.length; jj++) {
             const joint = skinJoints[jj];
-            const jointMatrix = (_c = animationMatrices.get(joint)) !== null && _c !== void 0 ? _c : create$3();
+            const jointMatrix = (_c = animationMatrices.get(joint.indexData.nodeIndex)) !== null && _c !== void 0 ? _c : create$3();
             const boneMatrix = create$3();
             const inverseBindMatrix = this.mat4FromTypedArray(inverseBindMatrices, jj);
             multiply(boneMatrix, nodeInverseMatrix, jointMatrix);
@@ -14877,7 +14910,7 @@ class AnimationController {
             // mat4.multiply(boneMatrix, jointMatrix, inverseBindMatrix);
             nodeBoneMatrices.set(boneMatrix, jj * 16);
         }
-        instance.animationState.boneMatrices.set(node, nodeBoneMatrices);
+        instance.animationState.boneMatrices.set(node.indexData.nodeIndex, nodeBoneMatrices);
     }
     mat4FromTypedArray(array, index) {
         const result = create$3();
@@ -15052,9 +15085,9 @@ class InstanceManager {
                 speed: 1,
                 loop: true,
                 playing: false,
-                animationMatrices: new WeakMap(),
-                animationNodeTransforms: new WeakMap(),
-                boneMatrices: new WeakMap()
+                animationMatrices: new Map(),
+                animationNodeTransforms: new Map(),
+                boneMatrices: new Map()
             },
             worldMatrix: new Float32Array(16) // 4x4 matrix
         };
@@ -15227,7 +15260,7 @@ class InstanceManager {
                     this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;
-                    const animationMatrix = animationMatrices.get(renderableNode.node);
+                    const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
                     if (nodeMatrixLoc) {
                         if (animationMatrix) {
                             this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix);
@@ -15238,7 +15271,7 @@ class InstanceManager {
                     }
                     let noBoneMatrices = true;
                     if (nodeBonesMatricesLoc) {
-                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node);
+                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
                         if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
                             this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
                             noBoneMatrices = false;
@@ -15250,7 +15283,7 @@ class InstanceManager {
                     // Calculate normal matrix (inverse transpose of the upper 3x3 model matrix)
                     const normalMatrix = create$4();
                     // Get nodeMatrix from instance from animation matrices
-                    const nodeMatrix = animationMatrices.get(renderableNode.node);
+                    const nodeMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
                     if (nodeMatrix) {
                         const nodeWorldMatrix = create$3();
                         multiply(nodeWorldMatrix, nodeMatrix, instance.worldMatrix);

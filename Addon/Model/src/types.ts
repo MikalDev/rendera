@@ -51,9 +51,9 @@ export interface AnimationState {
     speed: number;
     blendFactor?: number;
     loop: boolean;
-    animationNodeTransforms: WeakMap<Node, NodeTransforms>;
-    animationMatrices: WeakMap<Node, mat4>; // Node to animation matrix calculated by animation controller for this instance
-    boneMatrices: WeakMap<Node, Float32Array>;
+    animationNodeTransforms: Map<number, NodeTransforms>;
+    animationMatrices: Map<number, mat4>; // Node index to animation matrix calculated by animation controller for this instance
+    boneMatrices: Map<number, Float32Array>;
 }
 
 export interface NodeTransforms {
@@ -182,6 +182,7 @@ export interface ModelData {
         useSkinning: boolean;
     }[];
     materialSystem: MaterialSystem;
+    nodeArray?: Node[];
 }
 
 export interface JointData {
