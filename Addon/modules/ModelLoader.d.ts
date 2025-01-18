@@ -1,4 +1,4 @@
-import { Document, Node } from '@gltf-transform/core';
+import { Document } from '@gltf-transform/core';
 import { ModelId, ModelData, IGPUResourceManager, IModelLoader } from './types';
 export declare class ModelLoader implements IModelLoader {
     gl: WebGL2RenderingContext;
@@ -10,8 +10,8 @@ export declare class ModelLoader implements IModelLoader {
     initialized: boolean;
     constructor(gl: WebGL2RenderingContext, gpuResources: IGPUResourceManager);
     private createWebIO;
-    loadModel(modelPath: string, blobGLB?: Blob | null): Promise<ModelData>;
-    readDocument(modelPath: string, blobGLB: Blob): Promise<boolean>;
+    loadModel(modelPath: string, blobGLB?: Blob | null): Promise<ModelId>;
+    readDocument(modelPath: string, blobGLB: Blob | null): Promise<boolean>;
     hasModel(modelId: ModelId): boolean;
     modelLoading(modelId: ModelId): boolean;
     processModel(modelId: ModelId): Promise<boolean>;
@@ -36,29 +36,5 @@ export declare class ModelLoader implements IModelLoader {
     private loadImage;
     private getIndexType;
     private getAttributeLocation;
-    prepareModelDataForWorker(modelData: ModelData): {
-        renderableNodes: {
-            node: any;
-            useSkinning: boolean;
-        }[];
-        meshes: undefined;
-        materials: undefined;
-        materialSystem: undefined;
-        scene: {
-            traverse: (fn: (node: WorkerNode) => void) => any;
-        };
-        animations: {
-            name: string;
-            channels: {
-                input: import("@gltf-transform/core").TypedArray | null | undefined;
-                output: import("@gltf-transform/core").TypedArray | null | undefined;
-                targetPath: import("@gltf-transform/core").GLTF.AnimationChannelTargetPath | null;
-                targetNode: any;
-            }[];
-        }[];
-        jointData: import("./types").JointData[];
-        rootNode: Node;
-        nodeArray?: Node[];
-    };
 }
 //# sourceMappingURL=ModelLoader.d.ts.map

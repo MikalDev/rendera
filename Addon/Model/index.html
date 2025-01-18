@@ -20,7 +20,15 @@
         const canvas = document.getElementById('glCanvas');
         if (canvas) canvas.style.backgroundColor = '#101020';
         // @ts-ignore
-        const gl = canvas.getContext('webgl2');
+        const gl = canvas.getContext('webgl2', {
+            depth: {
+                format: 'depth-component24'
+            },
+            stencil: false,
+            alpha: false,
+            antialias: true,
+            preserveDrawingBuffer: true
+        });
         
         if (!gl) {
             alert('WebGL2 not supported in this browser!');
@@ -89,13 +97,16 @@
 
         console.log('Instance set');
         gpuResourceManager.updateLight(0, {
-            type: 'point',
+            type: 'directional',
+            castShadows: true,
             enabled: true,
-            position: [0, 10, 400],
+            position: [400, 10, 2000],
             color: [1.0, 1.0, 1.0],
-            intensity: 1.0,
-            attenuation: 0.0000001
+            intensity: 2.0,
+            attenuation: 0.0000001,
+            direction: [0, 0, -1]
         });
+        /*
         gpuResourceManager.updateLight(1, {
             type: 'spot',
             enabled: true,
@@ -129,6 +140,7 @@
             spotAngle: 0.99,
             spotPenumbra: 0.001
         });
+        */
         gpuResourceManager.updateCameraPosition([20, 20, 300]);
     
         // Create view projection matrix
@@ -164,11 +176,13 @@
 
         // Create render loop
         function render() {
+            // Clear color and depth buffers
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             // Animate the instance
-            instance.updateAnimation(0.007);
-            instance2.updateAnimation(0.008);
-            instance3.updateAnimation(0.001);
-            instance5.updateAnimation(0.01);
+            instance.updateAnimation(0.0007);
+            instance2.updateAnimation(0.0008);
+            instance3.updateAnimation(0.0001);
+            instance5.updateAnimation(0.001);
             rotation += 0.01;
             /*
             instance.setQuaternion(

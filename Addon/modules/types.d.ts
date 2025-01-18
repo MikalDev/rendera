@@ -1,9 +1,17 @@
 import { Model } from './Model';
 import { Node, Animation, Scene } from '@gltf-transform/core';
+import { mat4, vec3, vec4 } from 'gl-matrix';
 import { MaterialSystem } from './MaterialSystem';
 export declare const MAX_BONES = 64;
 export interface IAnimationTarget {
     updateTransform(path: 'translation' | 'rotation' | 'scale', values: Float32Array): void;
+}
+export interface ExtendedNode extends Node {
+    indexData: {
+        nodeIndex: number;
+        parentIndex: number | null;
+        childrenIndices: number[];
+    };
 }
 export type Nullable<T> = T | null;
 export interface INodeHierarchy {
@@ -82,7 +90,7 @@ export interface InstanceData {
 }
 export interface IModelLoader {
     hasModel(modelId: ModelId): boolean;
-    readDocument(url: string): Promise<boolean>;
+    readDocument(url: string, blobGLB: Blob | null): Promise<boolean>;
     processModel(modelId: ModelId): Promise<boolean>;
     getModelData(modelId: string): ModelData | null;
     deleteModel(modelId: string): void;
@@ -130,7 +138,7 @@ export interface ModelData {
     rootNode: Node;
     scene: Scene;
     renderableNodes: {
-        node: Node;
+        node: ExtendedNode;
         modelMesh: ModelMesh;
         useSkinning: boolean;
     }[];
@@ -152,7 +160,7 @@ export interface AnimationOptions {
 export type BufferUsage = WebGL2RenderingContext['STATIC_DRAW'] | WebGL2RenderingContext['DYNAMIC_DRAW'];
 export interface IGPUResourceManager {
     createBuffer(data: BufferSource, usage: BufferUsage): WebGLBuffer;
-    createTexture(image: ImageData | HTMLImageElement): WebGLTexture;
+    createTexture(image: ImageData | HTMLImageElement | ImageBitmap): WebGLTexture;
     deleteBuffer(buffer: WebGLBuffer): void;
     deleteTexture(texture: WebGLTexture): void;
     deleteVertexArray(vao: WebGLVertexArrayObject): void;
@@ -170,12 +178,14 @@ export interface IGPUResourceManager {
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
     bindShaderAndMaterial(shader: WebGLProgram, materialIndex: number, modelData: ModelData): void;
     gpuResourceCache: IGPUResourceCache;
+    lights: Light[];
 }
 export type AttributeSemantic = 'POSITION' | 'NORMAL' | 'TEXCOORD_0' | 'JOINTS_0' | 'WEIGHTS_0';
 export interface LightBase {
     enabled: boolean;
     color: [number, number, number];
     intensity: number;
+    castShadows: boolean;
 }
 export interface PointLight extends LightBase {
     type: 'point';

@@ -7,7 +7,7 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     private textures;
     private vaos;
     private readonly MAX_LIGHTS;
-    private lights;
+    lights: Light[];
     private dirtyLightParams;
     private dirtyLightStates;
     private cameraPosition;
@@ -15,7 +15,7 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     constructor(gl: WebGL2RenderingContext);
     createBuffer(data: BufferSource, usage: number): WebGLBuffer;
     createIndexBuffer(data: BufferSource, usage: number): WebGLBuffer;
-    createTexture(image: ImageData | HTMLImageElement): WebGLTexture;
+    createTexture(image: ImageData | HTMLImageElement | ImageBitmap): WebGLTexture;
     deleteBuffer(buffer: WebGLBuffer): void;
     deleteTexture(texture: WebGLTexture): void;
     deleteVertexArray(vao: WebGLVertexArrayObject): void;

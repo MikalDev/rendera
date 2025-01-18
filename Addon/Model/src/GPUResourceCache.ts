@@ -1,3 +1,5 @@
+import { IGPUResourceCache } from './types';
+
 export class GPUResourceCache implements IGPUResourceCache {
     private gl: WebGL2RenderingContext;
 

@@ -4,7 +4,7 @@ import { Model } from './Model';
 
 import { Node, Animation, Scene, Document as gltfDocument } from '@gltf-transform/core';
 
-// import { mat4, vec3, vec4 } from 'gl-matrix';
+import { mat4, vec3, vec4 } from 'gl-matrix';
 import { MaterialSystem } from './MaterialSystem';
 
 export const MAX_BONES = 64;
@@ -14,6 +14,14 @@ export interface IAnimationTarget {
         path: 'translation' | 'rotation' | 'scale',
         values: Float32Array
     ): void;
+}
+
+export interface ExtendedNode extends Node {
+    indexData: {
+        nodeIndex: number;
+        parentIndex: number | null;
+        childrenIndices: number[];
+    };
 }
 
 export type Nullable<T> = T | null;
@@ -123,7 +131,7 @@ export interface InstanceData {
 // Main class interfaces
 export interface IModelLoader {
     hasModel(modelId: ModelId): boolean;
-    readDocument(url: string): Promise<boolean>;
+    readDocument(url: string, blobGLB: Blob | null): Promise<boolean>;
     processModel(modelId: ModelId): Promise<boolean>;
     getModelData(modelId: string): ModelData | null;
     deleteModel(modelId: string): void;
@@ -177,7 +185,7 @@ export interface ModelData {
     rootNode: Node;
     scene: Scene;
     renderableNodes: {
-        node: Node;
+        node: ExtendedNode;
         modelMesh: ModelMesh;
         useSkinning: boolean;
     }[];
@@ -204,7 +212,7 @@ export type BufferUsage = WebGL2RenderingContext['STATIC_DRAW'] | WebGL2Renderin
 // GPU resource management
 export interface IGPUResourceManager {
     createBuffer(data: BufferSource, usage: BufferUsage): WebGLBuffer;
-    createTexture(image: ImageData | HTMLImageElement): WebGLTexture;
+    createTexture(image: ImageData | HTMLImageElement | ImageBitmap): WebGLTexture;
     deleteBuffer(buffer: WebGLBuffer): void;
     deleteTexture(texture: WebGLTexture): void;
     deleteVertexArray(vao: WebGLVertexArrayObject): void;
@@ -222,6 +230,7 @@ export interface IGPUResourceManager {
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
     bindShaderAndMaterial(shader: WebGLProgram, materialIndex: number, modelData: ModelData): void;
     gpuResourceCache: IGPUResourceCache;
+    lights: Light[];
 }
 
 // Add this type definition
@@ -232,6 +241,7 @@ export interface LightBase {
     enabled: boolean;
     color: [number, number, number];
     intensity: number;
+    castShadows: boolean;
 }
 
 export interface PointLight extends LightBase {

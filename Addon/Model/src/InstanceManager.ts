@@ -2,17 +2,17 @@ import { ModelError, ModelErrorCode } from './errors';
 import { InstanceData, IInstanceManager, IGPUResourceManager, InstanceId, type AnimationOptions, MAX_BONES, NodeTransforms } from './types';
 import { ModelLoader } from './ModelLoader';
 import { Model } from './Model';
-import { GPUResourceCache } from './GPUResourceCache';
 import { AnimationController } from './AnimationController';
 import { mat3, mat4 } from 'gl-matrix';
-import { Node } from '@gltf-transform/core';
+import { ShadowMapManager } from './ShadowMapManager';
 
 export class InstanceManager implements IInstanceManager {
     private gl: WebGL2RenderingContext;
     private modelLoader: ModelLoader;
     private instances: Map<number, InstanceData> = new Map();
-    private instancesByModel: Map<string, Set<number>> = new Map();
+    public instancesByModel: Map<string, Set<number>> = new Map();
     private defaultShaderProgram: WebGLProgram;
+    private shadowMapManager: ShadowMapManager;
     
     // GPU instance data
     private instanceBuffers: Map<string, {
@@ -35,9 +35,15 @@ export class InstanceManager implements IInstanceManager {
         this.modelLoader = modelLoader;
         this._animationController = new AnimationController(modelLoader);
         this.defaultShaderProgram = this.gpuResources.getDefaultShader();
+        this.shadowMapManager = new ShadowMapManager(gl);
+        this.shadowMapManager.initialize();
     }
 
     initialize(): void {
+        // Log WebGL context attributes
+        const contextAttributes = this.gl.getContextAttributes();
+        console.log('WebGL Context Attributes:', contextAttributes);
+
         // Basic WebGL2 initialization
         this.gl.clearColor(0.1, 0.1, 0.1, 1.0);
         this.gl.enable(this.gl.DEPTH_TEST);
@@ -177,29 +183,35 @@ export class InstanceManager implements IInstanceManager {
 
     render(viewProjection: { view: mat4, projection: mat4 }): void {
         // Render each model group
+        // @ts-ignore
         let renderer: WebGLRenderer;
+        // @ts-ignore
         const runtime = globalThis.veryBadLands
         if (runtime) {
             renderer = runtime.GetWebGLRenderer();
             renderer.EndBatch();
         }
-        // renderer.EndBatch()
+
         this.gpuResources.gpuResourceCache.cacheModelMode();
+
+        if (this.shadowMapManager) {
+            debugger;
+            this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
+            this.shadowMapManager.renderAllShadowMaps(this);
+        }
+
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
+
+        if (this.shadowMapManager) {
+            // Render debug shadow maps
+            // this.shadowMapManager.renderShadowMapDebug(0);
+        }
+
         this.gpuResources.gpuResourceCache.restoreModelMode();
         if (runtime) renderer.SetTexture(null);
     }
-
-    public updateModelAnimations(modelId: string, deltaTime: number): void {
-        for (const [modelId, instanceGroup] of this.instancesByModel) {
-            for (const instance of instanceGroup) {
-                instance.updateAnimation(deltaTime);
-            }
-        }
-    }
-
 
     public setModelPosition(x: number, y: number, z: number, instance: Model): void {
         const instanceData = this.instances.get(instance.instanceId.id);
@@ -294,7 +306,7 @@ export class InstanceManager implements IInstanceManager {
        instance.worldMatrix.set(srtMatrix);
     }
 
-    private renderModelInstances(
+    public renderModelInstances(
         modelId: string, 
         instanceGroup: Set<number>, 
         viewProjection: { view: mat4, projection: mat4 }
@@ -456,4 +468,5 @@ export class InstanceManager implements IInstanceManager {
     }
 }
 
+// @ts-ignore
 globalThis.InstanceManager = InstanceManager;

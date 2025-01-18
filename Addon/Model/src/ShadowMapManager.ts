@@ -1,0 +1,764 @@
+import { mat4, vec3 } from 'gl-matrix';
+import type { Light, DirectionalLight } from './types';
+import type { InstanceManager } from './InstanceManager';
+
+const SHADOW_MAP_CONSTANTS = {
+    MIN_RESOLUTION: 128,
+    MAX_RESOLUTION: 4096,
+    MAX_SHADOW_MAPS: 8
+} as const;
+
+export enum LightType {
+    DIRECTIONAL = 'directional',
+    SPOT = 'spot',
+    POINT = 'point'
+    // Add others as needed
+}
+
+/**
+ * Defines the filtering mode for shadow map sampling.
+ * NEAREST provides harder shadows with more aliasing but better performance.
+ * LINEAR provides softer shadow edges but may introduce some artifacts.
+ */
+export enum ShadowFilterMode {
+    NEAREST = 'NEAREST',
+    LINEAR = 'LINEAR'
+}
+
+/**
+ * Defines the format and precision of the shadow map texture.
+ * DEPTH24_UINT - Standard 24-bit depth format, good balance of precision and memory
+ * DEPTH32F_FLOAT - 32-bit float depth format, highest precision but more memory usage
+ */
+export enum ShadowMapFormat {
+    DEPTH24_UINT = 'DEPTH24_UINT',
+    DEPTH32F_FLOAT = 'DEPTH32F_FLOAT'
+}
+
+/**
+ * Internal data structure for storing shadow map resources and state.
+ */
+interface ShadowMapData {
+    /** The depth texture used for shadow mapping */
+    texture: WebGLTexture;
+    /** Reference to the light casting this shadow */
+    light: Light;
+    /** Framebuffer used for rendering the shadow map */
+    framebuffer: WebGLFramebuffer;
+    /** Matrix transforming world space to light space */
+    view: mat4;
+    /** Matrix transforming world space to light space */
+    projection: mat4;
+}
+
+/**
+ * Represents the axis-aligned bounding box of the scene in world space.
+ * Used to calculate the shadow map frustum that encompasses all visible objects.
+ */
+interface SceneBounds {
+    /** Minimum point of the bounding box in world space */
+    min: vec3;
+    /** Maximum point of the bounding box in world space */
+    max: vec3;
+}
+
+/**
+ * Manages shadow map generation and resources for a scene's lights.
+ * Handles creation, updating, and rendering of shadow maps for different light types.
+ * Currently supports directional lights, with architecture ready for spot and point lights.
+ */
+export class ShadowMapManager {
+    private gl: WebGL2RenderingContext;
+    private shadowMaps: Map<number, ShadowMapData>;
+    private resolution: number;
+    private filterMode: ShadowFilterMode;
+    private format: ShadowMapFormat;
+    private sceneBounds: SceneBounds | null;
+    /** Default scene bounds used when no specific bounds are set */
+    private static readonly DEFAULT_BOUNDS: SceneBounds = {
+        min: vec3.fromValues(-1000, -1000, -1000),
+        max: vec3.fromValues(1000, 1000, 1000)
+    };
+    
+    private readonly matrixPool: {
+        view: mat4;
+        projection: mat4;
+    } = {
+        view: mat4.create(),
+        projection: mat4.create()
+    };
+    
+    /**
+     * Creates a new ShadowMapManager instance.
+     * @param gl - The WebGL2 context to use for rendering
+     */
+    constructor(gl: WebGL2RenderingContext) {
+        this.gl = gl;
+        this.shadowMaps = new Map();
+        this.resolution = 1024; // Default resolution
+        this.filterMode = ShadowFilterMode.LINEAR; // Default to linear for better quality
+        this.format = ShadowMapFormat.DEPTH24_UINT; // Default to 24-bit depth
+        this.sceneBounds = ShadowMapManager.DEFAULT_BOUNDS;
+    }
+
+    /**
+     * Initializes the shadow map manager with the specified settings.
+     * @param resolution - The resolution of the shadow maps in pixels (default: 1024)
+     * @param filterMode - The filtering mode to use for shadow sampling (default: LINEAR)
+     * @param format - The format to use for shadow maps (default: DEPTH24_UINT)
+     */
+    initialize(
+        resolution: number = 1024, 
+        filterMode: ShadowFilterMode = ShadowFilterMode.LINEAR,
+        format: ShadowMapFormat = ShadowMapFormat.DEPTH24_UINT
+    ): void {
+        if (!Number.isInteger(Math.log2(resolution)) || 
+            resolution < SHADOW_MAP_CONSTANTS.MIN_RESOLUTION || 
+            resolution > SHADOW_MAP_CONSTANTS.MAX_RESOLUTION) {
+            throw new Error(`Shadow map resolution must be a power of 2 between ${SHADOW_MAP_CONSTANTS.MIN_RESOLUTION} and ${SHADOW_MAP_CONSTANTS.MAX_RESOLUTION}`);
+        }
+        this.resolution = resolution;
+        this.filterMode = filterMode;
+        this.format = format;
+    }
+
+    /**
+     * Updates the scene bounds used for shadow frustum calculations.
+     * @param bounds - The new scene bounds in world space
+     * @throws Error if bounds are invalid
+     */
+    setSceneBounds(bounds: SceneBounds): void {
+        this.validateBounds(bounds);
+        
+        // Create a copy to prevent external modification
+        this.sceneBounds = {
+            min: vec3.clone(bounds.min),
+            max: vec3.clone(bounds.max)
+        };
+    }
+
+    /**
+     * Gets the current scene bounds.
+     * @returns A copy of the current scene bounds to prevent external modification
+     */
+    getSceneBounds(): SceneBounds {
+        const bounds = this.sceneBounds || ShadowMapManager.DEFAULT_BOUNDS;
+        return {
+            min: vec3.clone(bounds.min),
+            max: vec3.clone(bounds.max)
+        };
+    }
+
+    /**
+     * Validates scene bounds for correctness.
+     * @param bounds - The bounds to validate
+     * @throws Error if bounds are invalid (not finite numbers, min > max, etc.)
+     * @private
+     */
+    private validateBounds(bounds: SceneBounds): void {
+        // Check if vectors are valid
+        if (!bounds.min || !bounds.max || 
+            bounds.min.length !== 3 || bounds.max.length !== 3) {
+            throw new Error('Scene bounds must have valid min and max vectors');
+        }
+
+        // Check if min is actually less than max for each component
+        for (let i = 0; i < 3; i++) {
+            if (bounds.min[i] > bounds.max[i]) {
+                throw new Error(`Scene bounds min[${i}] must be less than or equal to max[${i}]`);
+            }
+        }
+
+        // Check for invalid values
+        const checkVector = (v: vec3, name: string) => {
+            for (let i = 0; i < 3; i++) {
+                if (!Number.isFinite(v[i])) {
+                    throw new Error(`Scene bounds ${name}[${i}] must be a finite number`);
+                }
+            }
+        };
+        checkVector(bounds.min, 'min');
+        checkVector(bounds.max, 'max');
+    }
+
+    /**
+     * Expands the scene bounds to include the given point.
+     * Useful for incrementally building bounds from scene geometry.
+     * @param point - The point to include in world space
+     */
+    expandBounds(point: vec3): void {
+        if (!this.sceneBounds) {
+            this.sceneBounds = {
+                min: vec3.clone(point),
+                max: vec3.clone(point)
+            };
+            return;
+        }
+
+        // Expand bounds to include the point
+        for (let i = 0; i < 3; i++) {
+            this.sceneBounds.min[i] = Math.min(this.sceneBounds.min[i], point[i]);
+            this.sceneBounds.max[i] = Math.max(this.sceneBounds.max[i], point[i]);
+        }
+    }
+
+    /**
+     * Resets scene bounds to null, forcing use of default bounds until new bounds are set.
+     */
+    resetBounds(): void {
+        this.sceneBounds = null;
+    }
+
+    /**
+     * Creates shadow map resources for a light.
+     * Sets up the depth texture, framebuffer, and other WebGL resources needed for shadow mapping.
+     * 
+     * @param light - The light to create shadow map resources for
+     * @returns The created shadow map resources
+     * @throws Error if framebuffer initialization fails
+     * @private
+     */
+    private createShadowMapResources(light: Light): ShadowMapData {
+        // Store current WebGL state
+        const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+        const currentFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
+        const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
+        const currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
+        const currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+
+        try {
+            // Create resources
+            const texture = this.createGLResource(() => this.gl.createTexture(), 'texture');
+            const framebuffer = this.createGLResource(() => this.gl.createFramebuffer(), 'framebuffer');
+
+            // Setup texture
+            this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+
+            // Configure format based on settings
+            const format = this.format === ShadowMapFormat.DEPTH32F_FLOAT
+                ? {
+                    internalFormat: this.gl.DEPTH_COMPONENT32F,
+                    format: this.gl.DEPTH_COMPONENT,
+                    type: this.gl.FLOAT
+                }
+                : {
+                    internalFormat: this.gl.DEPTH_COMPONENT24,
+                    format: this.gl.DEPTH_COMPONENT,
+                    type: this.gl.UNSIGNED_INT
+                };
+
+            this.gl.texImage2D(
+                this.gl.TEXTURE_2D, 0, format.internalFormat,
+                this.resolution, this.resolution, 0,
+                format.format, format.type, null
+            );
+
+            // Set texture parameters
+            const filter = this.filterMode === ShadowFilterMode.LINEAR ? this.gl.LINEAR : this.gl.NEAREST;
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, filter);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, filter);
+            
+            // Use CLAMP_TO_EDGE for shadow edges
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+            
+            // Set up comparison mode for shadow sampling
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_FUNC, this.gl.LEQUAL);
+
+            // Setup framebuffer
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, framebuffer);
+            this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.DEPTH_ATTACHMENT, this.gl.TEXTURE_2D, texture, 0);
+            
+            // Configure framebuffer
+            this.gl.drawBuffers([this.gl.NONE]);
+            this.gl.readBuffer(this.gl.NONE);
+
+            // Verify framebuffer is complete
+            const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
+            if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
+                this.gl.deleteTexture(texture);
+                this.gl.deleteFramebuffer(framebuffer);
+                throw new Error('Framebuffer initialization failed: ' + status);
+            }
+
+            // Reset bindings
+            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+
+            return { 
+                texture, 
+                light, 
+                framebuffer,
+                view: mat4.create(), 
+                projection: mat4.create() 
+            };
+        } finally {
+            // Restore all WebGL state
+            this.gl.bindTexture(this.gl.TEXTURE_2D, currentTexture);
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentFramebuffer);
+            if (currentDepthTest) {
+                this.gl.enable(this.gl.DEPTH_TEST);
+            } else {
+                this.gl.disable(this.gl.DEPTH_TEST);
+            }
+            this.gl.depthFunc(currentDepthFunc);
+            this.gl.colorMask(
+                currentColorMask[0],
+                currentColorMask[1],
+                currentColorMask[2],
+                currentColorMask[3]
+            );
+        }
+    }
+
+    /**
+     * Calculates the view-projection matrix for a directional light.
+     * Creates an orthographic projection that encompasses the entire scene bounds
+     * and positions the view matrix based on the light's direction.
+     * 
+     * @param light - The directional light to calculate the matrix for
+     * @param bounds - The scene bounds to encompass in the shadow map
+     * @returns The calculated view-projection matrix for shadow mapping
+     * @private
+     */
+    private calculateDirectionalLightMatrix(light: DirectionalLight, bounds: SceneBounds): { view: mat4; projection: mat4 } {
+        // Use pool matrices directly
+        mat4.identity(this.matrixPool.view);
+        mat4.identity(this.matrixPool.projection);
+        this.validateBounds(bounds);  // Validate bounds before using
+        
+        const center = vec3.create();
+        const size = vec3.create();
+
+        // Calculate scene center and size
+        vec3.add(center, bounds.max, bounds.min);
+        vec3.scale(center, center, 0.5);
+        vec3.sub(size, bounds.max, bounds.min);
+
+        // Create view matrix looking from light direction
+        const up = Math.abs(light.direction[1]) > 0.99 ? vec3.fromValues(1, 0, 0) : vec3.fromValues(0, 1, 0);
+        mat4.lookAt(
+            this.matrixPool.view,
+            vec3.fromValues(
+                center[0] + light.direction[0],
+                center[1] + light.direction[1],
+                center[2] + light.direction[2]
+            ),
+            center,
+            up
+        );
+
+        // Create orthographic projection that encompasses the scene
+        const maxSize = Math.max(size[0], size[1], size[2]);
+        mat4.ortho(
+            this.matrixPool.projection,
+            -maxSize/2, maxSize/2,
+            -maxSize/2, maxSize/2,
+            0.1, maxSize * 2
+        );
+        
+        return { view: this.matrixPool.view, projection: this.matrixPool.projection };
+    }
+
+    /**
+     * Updates the shadow map data for a light, creating resources if needed.
+     * Should be called when light properties change or scene bounds are updated.
+     * For directional lights, updates the view-projection matrix based on current bounds.
+     * 
+     * @param lightId - Unique identifier for the light
+     * @param light - The light to update shadow map data for
+     */
+    updateShadowMap(lightId: number, light: Light): void {
+        if (!light.enabled || this.shadowMaps.size >= SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS) {
+            return;
+        }
+        
+        if (light.type === LightType.DIRECTIONAL && vec3.len(light.direction) === 0) {
+            return;
+        }
+        
+        // Get or create shadow map resources
+        let shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData) {
+            shadowData = this.createShadowMapResources(light);
+            this.shadowMaps.set(lightId, shadowData);
+        }
+
+        // Update light reference in case it changed
+        shadowData.light = light;
+
+        // Get current bounds
+        const bounds = this.getSceneBounds();
+
+        // Calculate view-projection matrix based on light type
+        if (light.type === LightType.DIRECTIONAL) {
+            const matrices = this.calculateDirectionalLightMatrix(light, bounds);
+            shadowData.view = matrices.view;
+            shadowData.projection = matrices.projection;
+        }
+        // Future light types will be handled here
+        // else if (light.type === 'spot') { ... }
+        // else if (light.type === 'point') { ... }
+    }
+
+    /**
+     * Changes the filtering mode for all shadow maps.
+     * Updates existing shadow maps to use the new filtering mode.
+     * No-op if the new mode is the same as the current mode.
+     * 
+     * @param mode - The new filtering mode to use
+     */
+    setFilterMode(mode: ShadowFilterMode): void {
+        if (this.filterMode === mode) return;
+        
+        const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+        
+        try {
+            this.filterMode = mode;
+            for (const [_, data] of this.shadowMaps) {
+                this.gl.bindTexture(this.gl.TEXTURE_2D, data.texture);
+                const filter = mode === ShadowFilterMode.LINEAR ? this.gl.LINEAR : this.gl.NEAREST;
+                this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, filter);
+                this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, filter);
+            }
+        } finally {
+            this.gl.bindTexture(this.gl.TEXTURE_2D, currentTexture);
+        }
+    }
+
+    /**
+     * Cleans up all shadow map resources.
+     * Deletes textures, framebuffers, and renderbuffers.
+     * Should be called when the shadow map manager is no longer needed.
+     */
+    cleanup(): void {
+        for (const [_, data] of this.shadowMaps) {
+            this.cleanupGLResources(data);
+        }
+        this.shadowMaps.clear();
+    }
+
+    renderInstances(instanceManager: InstanceManager, shadowData: ShadowMapData): void {
+        for (const [modelId, instanceGroup] of instanceManager.instancesByModel) {
+            instanceManager.renderModelInstances(modelId, instanceGroup, { view: shadowData.view, projection: shadowData.projection });
+        }
+    }
+
+    /**
+     * Renders the shadow map for a given light.
+     * Handles all the setup, rendering, and cleanup for shadow map generation.
+     * Preserves WebGL state and restores it after rendering.
+     * 
+     * @param lightId - The ID of the light to render shadows for
+     * @param instanceManager - The instance manager that will render the scene
+     * @throws Error if the shadow map resources aren't initialized
+     */
+    renderShadowMap(lightId: number, instanceManager: InstanceManager): void {
+        const shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData) {
+            throw new Error(`No shadow map data found for light ${lightId}`);
+        }
+
+        // Store current state
+        const currentViewport = this.gl.getParameter(this.gl.VIEWPORT);
+        const currentFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
+        const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
+        const currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
+        const currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+
+        const currentClearColor = this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
+        const currentClearDepth = this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE);
+
+        try {
+            // Set up shadow rendering state
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, shadowData.framebuffer);
+            this.gl.viewport(0, 0, this.resolution, this.resolution);
+
+            // Add before clearing
+            this.gl.clearDepth(currentClearDepth);
+            this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
+
+            // Set up depth test state
+            this.gl.enable(this.gl.DEPTH_TEST);
+            this.gl.depthFunc(this.gl.LESS);
+
+            // Disable color writing as we only need depth
+            this.gl.colorMask(false, false, false, false);
+
+            // Render the scene from light's perspective
+            this.renderInstances(instanceManager, shadowData);
+        } finally {
+            // Restore state
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentFramebuffer);
+            this.gl.viewport(currentViewport[0], currentViewport[1], currentViewport[2], currentViewport[3]);
+            this.gl.depthFunc(currentDepthFunc);
+            if (currentDepthTest) {
+                this.gl.enable(this.gl.DEPTH_TEST);
+            } else {
+                this.gl.disable(this.gl.DEPTH_TEST);
+            }
+            this.gl.colorMask(currentColorMask[0], currentColorMask[1], currentColorMask[2], currentColorMask[3]);
+
+            // Add to state restore
+            this.gl.clearColor(currentClearColor[0], currentClearColor[1], 
+                              currentClearColor[2], currentClearColor[3]);
+            this.gl.clearDepth(currentClearDepth);
+        }
+    }
+
+    /**
+     * Gets the shadow map data needed for rendering with shadows.
+     * Should be called during main render pass to get the shadow information.
+     * Returns null if the light is disabled or no shadow map exists.
+     * 
+     * @param lightId - The ID of the light to get shadow data for
+     * @returns Object containing the shadow map texture and its view-projection matrix, or null if no shadow map exists
+     */
+    getShadowData(lightId: number): { texture: WebGLTexture; view: mat4; projection: mat4 } | null {
+        const shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData || !shadowData.light.enabled) {
+            return null;
+        }
+        return {
+            texture: shadowData.texture,
+            view: mat4.clone(shadowData.view),
+            projection: mat4.clone(shadowData.projection)
+        };
+    }
+
+    private createGLResource<T>(creator: () => T | null, resourceName: string): T {
+        const resource = creator();
+        if (!resource) {
+            throw new Error(`Failed to create WebGL ${resourceName}`);
+        }
+        return resource;
+    }
+
+    /**
+     * Changes the resolution of all shadow maps.
+     * Recreates all shadow maps with the new resolution.
+     */
+    setResolution(resolution: number): void {
+        if (!Number.isInteger(Math.log2(resolution)) || 
+            resolution < SHADOW_MAP_CONSTANTS.MIN_RESOLUTION || 
+            resolution > SHADOW_MAP_CONSTANTS.MAX_RESOLUTION) {
+            throw new Error(`Shadow map resolution must be a power of 2 between ${SHADOW_MAP_CONSTANTS.MIN_RESOLUTION} and ${SHADOW_MAP_CONSTANTS.MAX_RESOLUTION}`);
+        }
+
+        // Store old shadow maps
+        const oldMaps = new Map(this.shadowMaps);
+        
+        // Update resolution
+        this.resolution = resolution;
+        
+        // Recreate all shadow maps with new resolution
+        this.shadowMaps.clear();
+        for (const [lightId, data] of oldMaps) {
+            this.cleanupGLResources(data);
+            if (data.light.enabled) {
+                this.updateShadowMap(lightId, data.light);
+            }
+        }
+    }
+
+    /**
+     * Removes shadow map resources for a specific light.
+     * @param lightId - ID of the light whose shadow map should be removed
+     */
+    removeShadowMap(lightId: number): void {
+        const shadowData = this.shadowMaps.get(lightId);
+        if (shadowData) {
+            this.cleanupGLResources(shadowData);
+            this.shadowMaps.delete(lightId);
+        }
+    }
+
+    private cleanupGLResources(data: ShadowMapData): void {
+        this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+        this.gl.deleteTexture(data.texture);
+        this.gl.deleteFramebuffer(data.framebuffer);
+    }
+
+    /**
+     * Renders shadow maps for all enabled lights.
+     * Iterates over all shadow maps and renders them if the light is enabled.
+     * @param instanceManager - The instance manager that will render the scene
+     */
+    renderAllShadowMaps(instanceManager: InstanceManager): void {
+        for (const [lightId, shadowData] of this.shadowMaps) {
+            if (shadowData.light.enabled) {
+                this.renderShadowMap(lightId, instanceManager);
+            }
+        }
+    }
+
+    /**
+     * Updates all shadow maps using the provided array of lights.
+     * Iterates over the lights and updates the shadow map for each enabled light.
+     * @param lights - Array of lights to update shadow maps for
+     */
+    updateAllShadowMaps(lights: Light[]): void {
+        lights.forEach((light, index) => {
+            if (light.enabled) {
+                this.updateShadowMap(index, light);
+            }
+        });
+    }
+
+    /**
+     * Renders a shadow map for debugging purposes.
+     * @param lightId - The ID of the light to render the shadow map for
+     */
+    renderShadowMapDebug(lightId: number): void {
+        const shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData) {
+            throw new Error(`No shadow map data found for light ${lightId}`);
+        }
+
+        // Store WebGL state
+        const currentProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
+        const currentViewport = this.gl.getParameter(this.gl.VIEWPORT);
+        const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
+        const currentBlend = this.gl.getParameter(this.gl.BLEND);
+        const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+
+        try {
+            // Set up state for debug rendering
+            this.gl.disable(this.gl.DEPTH_TEST);
+            this.gl.disable(this.gl.BLEND);
+            this.gl.viewport(0, 0, this.resolution, this.resolution);
+
+            // Check if the shader program is already created
+            if (!this.debugShaderProgram) {
+                const vertexShaderSource = `#version 300 es
+                in vec2 a_position;
+                out vec2 v_texCoord;
+                void main() {
+                    v_texCoord = a_position * 0.5 + 0.5;
+                    gl_Position = vec4(a_position, 0.0, 1.0);
+                }`;
+
+                const fragmentShaderSource = `#version 300 es
+                precision highp float;
+                precision highp sampler2DShadow;
+                
+                in vec2 v_texCoord;
+                uniform sampler2DShadow u_depthTexture;
+                out vec4 outColor;
+                
+                void main() {
+                    // Compare with a fixed ref value = 0.5 for demonstration.
+                    // Values in the texture < 0.5 become "1," others become "0," possibly plus PCF if filters are set to LINEAR.
+                    float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.5));
+                    outColor = vec4(vec3(shadowResult), 1.0);
+                }`;
+
+                this.debugShaderProgram = this.createShaderProgram(vertexShaderSource, fragmentShaderSource);
+            }
+
+            this.gl.useProgram(this.debugShaderProgram);
+
+            // Bind the shadow map texture
+            this.gl.activeTexture(this.gl.TEXTURE0);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
+            const texLocation = this.gl.getUniformLocation(this.debugShaderProgram, 'u_depthTexture');
+            if (texLocation === null) {
+                throw new Error('Could not find u_depthTexture uniform');
+            }
+            this.gl.uniform1i(texLocation, 0);
+
+            // Create and set up vertex buffer
+            const positionBuffer = this.gl.createBuffer();
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
+            const positions = new Float32Array([
+                -1, -1,
+                1, -1,
+                -1, 1,
+                1, 1,
+            ]);
+            this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
+
+            const positionLocation = this.gl.getAttribLocation(this.debugShaderProgram, 'a_position');
+            if (positionLocation === -1) {
+                throw new Error('Could not find a_position attribute');
+            }
+            this.gl.enableVertexAttribArray(positionLocation);
+            this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0);
+
+            // Draw the quad
+            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+            // Clean up
+            this.gl.disableVertexAttribArray(positionLocation);
+            this.gl.deleteBuffer(positionBuffer);
+            
+            // Restore comparison mode
+            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
+            
+        } finally {
+            // Restore WebGL state
+            this.gl.useProgram(currentProgram);
+            this.gl.viewport(currentViewport[0], currentViewport[1], currentViewport[2], currentViewport[3]);
+            if (currentDepthTest) {
+                this.gl.enable(this.gl.DEPTH_TEST);
+            } else {
+                this.gl.disable(this.gl.DEPTH_TEST);
+            }
+            if (currentBlend) {
+                this.gl.enable(this.gl.BLEND);
+            } else {
+                this.gl.disable(this.gl.BLEND);
+            }
+            this.gl.bindTexture(this.gl.TEXTURE_2D, currentTexture);
+        }
+    }
+
+    /**
+     * Helper method to create a shader program.
+     * @param vertexSource - The vertex shader source code
+     * @param fragmentSource - The fragment shader source code
+     * @returns The created shader program
+     */
+    private createShaderProgram(vertexSource: string, fragmentSource: string): WebGLProgram {
+        const vertexShader = this.compileShader(this.gl.VERTEX_SHADER, vertexSource);
+        const fragmentShader = this.compileShader(this.gl.FRAGMENT_SHADER, fragmentSource);
+        const program = this.gl.createProgram();
+        if (!program) {
+            throw new Error('Failed to create shader program');
+        }
+        this.gl.attachShader(program, vertexShader);
+        this.gl.attachShader(program, fragmentShader);
+        this.gl.linkProgram(program);
+        if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
+            throw new Error('Failed to link program: ' + this.gl.getProgramInfoLog(program));
+        }
+        this.gl.deleteShader(vertexShader);
+        this.gl.deleteShader(fragmentShader);
+        return program;
+    }
+
+    /**
+     * Helper method to compile a shader.
+     * @param type - The shader type (VERTEX_SHADER or FRAGMENT_SHADER)
+     * @param source - The shader source code
+     * @returns The compiled shader
+     */
+    private compileShader(type: number, source: string): WebGLShader {
+        const shader = this.gl.createShader(type);
+        if (!shader) {
+            throw new Error('Failed to create shader');
+        }
+        this.gl.shaderSource(shader, source);
+        this.gl.compileShader(shader);
+        if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) {
+            throw new Error('Failed to compile shader: ' + this.gl.getShaderInfoLog(shader));
+        }
+        return shader;
+    }
+
+    // Add a property to cache the shader program
+    private debugShaderProgram: WebGLProgram | null = null;
+} 

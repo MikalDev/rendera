@@ -1,6 +1,6 @@
 import { Animation,Accessor, Document, Node, Primitive, WebIO, Texture, Mesh, TextureInfo } from '@gltf-transform/core';
 import { ModelError, ModelErrorCode, createModelError } from './errors';
-import { AttributeSemantic, ModelId, ModelData, IGPUResourceManager, MeshPrimitive, MaterialData, IModelLoader, SAMPLER_TEXTURE_UNIT_MAP, ModelMesh } from './types';
+import { AttributeSemantic, ModelId, ModelData, IGPUResourceManager, MeshPrimitive, MaterialData, IModelLoader, SAMPLER_TEXTURE_UNIT_MAP, ModelMesh, ExtendedNode } from './types';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { DracoDecoderModule } from './draco_decoder_gltf';
 import { mat4} from 'gl-matrix';
@@ -31,7 +31,7 @@ export class ModelLoader implements IModelLoader {
         this.initialized = true;
     }
 
-    async loadModel(modelPath: string, blobGLB: Blob | null = null): Promise<ModelData> {
+    async loadModel(modelPath: string, blobGLB: Blob | null = null): Promise<ModelId> {
         if (this._modelsLoading.has(modelPath)) {
             console.warn('[rendera] ModelLoader: loadModel - model already loading', modelPath);
             return {id: modelPath};
@@ -43,7 +43,7 @@ export class ModelLoader implements IModelLoader {
         return {id: modelPath};
     }
 
-    async readDocument(modelPath: string, blobGLB: Blob): Promise<boolean> {
+    async readDocument(modelPath: string, blobGLB: Blob | null): Promise<boolean> {
         try {
             let document;
             if (blobGLB) {
@@ -53,12 +53,10 @@ export class ModelLoader implements IModelLoader {
             } else {
                 document = await this.webio.read(modelPath);
             }
-            
-            console.info('[rendera] ModelLoader: read', modelPath);
             this._pendingDocuments.set(modelPath, document);
             return true;
         } catch (error) {
-            throw this.createModelError(ModelErrorCode.LOAD_FAILED, `Failed to read document: ${error}`);
+            throw this.createModelError(ModelErrorCode.LOAD_FAILED, `Failed: ${error}`);
         }
     }
 
@@ -87,8 +85,6 @@ export class ModelLoader implements IModelLoader {
         
         // Store model data
         this.loadedModels.set(modelId.id, modelData);
-        // const preparedModelData = this.prepareModelDataForWorker(modelData);
-        //console.log('[rendera] ModelLoader: processModel - preparedModelData', preparedModelData);
         console.info('[rendera] ModelLoader: processModel - modelData loaded', modelId.id);
         return true;
     }
@@ -185,13 +181,13 @@ export class ModelLoader implements IModelLoader {
             };
 
             // Attach the data to the node
-            (node as any).indexData = indexData;
+            (node as ExtendedNode).indexData = indexData;
 
             const mesh = node.getMesh();
             if (mesh) {
                 const modelMesh = this.processMesh(mesh, document);
                 modelData.renderableNodes.push({
-                    node,
+                    node: node as ExtendedNode,
                     modelMesh,
                     useSkinning: !!node.getSkin(),
                 });
@@ -579,37 +575,7 @@ export class ModelLoader implements IModelLoader {
             );
         }
     }
-    // Worker data structures
-    public prepareModelDataForWorker(modelData: ModelData) {
-        const { nodes, rootNode } = createWorkerNodes(modelData);
-    
-        return {
-            ...modelData,
-            // Replace gltf Nodes with WorkerNodes
-            renderableNodes: modelData.renderableNodes.map(rn => ({
-                node: nodes.get(nodeToId(rn.node))!,  // Convert to WorkerNode
-                useSkinning: rn.useSkinning
-            })),
-            // Remove WebGL resources
-            meshes: undefined,
-            materials: undefined,
-            materialSystem: undefined,
-            // Include scene traversal root
-            scene: {
-                traverse: (fn: (node: WorkerNode) => void) => rootNode.traverse(fn)
-            },
-            // Convert animations to use WorkerNodes
-            animations: Array.from(modelData.animations.entries()).map(([name, anim]) => ({
-                name,
-                channels: anim.listChannels().map(channel => ({
-                    input: channel.getSampler()?.getInput()?.getArray(),
-                    output: channel.getSampler()?.getOutput()?.getArray(),
-                    targetPath: channel.getTargetPath(),
-                    targetNode: nodes.get(nodeToId(channel.getTargetNode()!))!
-                }))
-            }))
-        };
-    }
 }
 
+// @ts-ignore
 globalThis.ModelLoader = ModelLoader;

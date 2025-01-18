@@ -1,3 +1,4 @@
+import { IGPUResourceCache } from './types';
 export declare class GPUResourceCache implements IGPUResourceCache {
     private gl;
     private cachedState;

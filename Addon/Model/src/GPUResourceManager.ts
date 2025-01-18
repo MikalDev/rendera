@@ -13,7 +13,7 @@ export class GPUResourceManager implements IGPUResourceManager {
     private vaos: Set<WebGLVertexArrayObject> = new Set();
 
     private readonly MAX_LIGHTS = 8;
-    private lights: Light[] = new Array(8);
+    public lights: Light[] = new Array(8);
     private dirtyLightParams: boolean = false;
     private dirtyLightStates: Set<number> = new Set();
 
@@ -31,7 +31,9 @@ export class GPUResourceManager implements IGPUResourceManager {
             position: [0, 0, -5],
             color: [1, 1, 1],
             intensity: 0,
-            attenuation: 1
+            attenuation: 1,
+            castShadows: false,
+            direction: [0, 0, -1]
         }));
         this.gpuResourceCache = new GPUResourceCache(gl);
     }
@@ -67,7 +69,7 @@ export class GPUResourceManager implements IGPUResourceManager {
         return buffer;
     }
 
-    createTexture(image: ImageData | HTMLImageElement): WebGLTexture {
+    createTexture(image: ImageData | HTMLImageElement | ImageBitmap): WebGLTexture {
         const texture = this.gl.createTexture();
         if (!texture) {
             throw this.createError(
@@ -654,4 +656,5 @@ export class ShaderSystem {
     }
 }
 
+// @ts-ignore
 globalThis.GPUResourceManager = GPUResourceManager;

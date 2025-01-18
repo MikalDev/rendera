@@ -31,5 +31,11 @@ export * from './ModelLoader';
 /// <reference path="./SceneGraph.d.ts" />
 export * from './SceneGraph';
 
+/// <reference path="./ScreenSpaceShadowManager.d.ts" />
+export * from './ScreenSpaceShadowManager';
+
+/// <reference path="./ShadowMapManager.d.ts" />
+export * from './ShadowMapManager';
+
 /// <reference path="./types.d.ts" />
 export * from './types';

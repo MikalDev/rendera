@@ -8,8 +8,9 @@ export declare class InstanceManager implements IInstanceManager {
     private gl;
     private modelLoader;
     private instances;
-    private instancesByModel;
+    instancesByModel: Map<string, Set<number>>;
     private defaultShaderProgram;
+    private shadowMapManager;
     private instanceBuffers;
     private nextInstanceId;
     private dirtyInstances;
@@ -30,7 +31,6 @@ export declare class InstanceManager implements IInstanceManager {
         view: mat4;
         projection: mat4;
     }): void;
-    updateModelAnimations(modelId: string, deltaTime: number): void;
     setModelPosition(x: number, y: number, z: number, instance: Model): void;
     setModelRotation(quaternion: Float32Array, instance: Model): void;
     setModelScale(x: number, y: number, z: number, instance: Model): void;
@@ -43,7 +43,10 @@ export declare class InstanceManager implements IInstanceManager {
     private removeFromModelGroup;
     updateAnimation(instance: InstanceData, deltaTime: number): void;
     private updateWorldMatrix;
-    private renderModelInstances;
+    renderModelInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
+        view: mat4;
+        projection: mat4;
+    }): void;
     private startAnimation;
     private cleanupInstance;
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
