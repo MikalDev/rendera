@@ -14314,10 +14314,14 @@ class GPUResourceManager {
         uniform mat3 u_NormalMatrix;
         uniform mat4 u_NodeMatrix;
         uniform bool u_UseSkinning;
+        uniform bool u_UseShadowMap;
+        uniform mat4 u_LightViewProjection;  // Light's view-projection matrix
+
         out vec2 v_UV;
         out vec3 v_Normal;
         out vec3 v_Position;
         out mat3 v_TBN;
+        out vec4 v_PositionFromLight;  // Add position from light's perspective
 
         void main() {
             v_UV = uv;
@@ -14361,11 +14365,17 @@ class GPUResourceManager {
             // Create TBN matrix for transforming from tangent space to world space
             v_TBN = mat3(T, B, N);
             
+            // Calculate position from light's perspective for shadow mapping
+            if (u_UseShadowMap) {
+                vec4 worldPos = u_Model * (u_UseSkinning ? skinVertex : vec4(position, 1.0));
+                v_PositionFromLight = u_LightViewProjection * worldPos;
+            }
         }`;
         const fragmentShader = `#version 300 es
         #extension GL_EXT_shader_texture_lod : enable
         #extension GL_OES_standard_derivatives : enable
         precision highp float;
+        precision highp sampler2DShadow;  // Match ShadowMapManager's precision
 
         // Light structure matching TypeScript definitions
         struct Light {
@@ -14387,6 +14397,7 @@ class GPUResourceManager {
         in vec3 v_Normal;
         in vec3 v_Position;
         in mat3 v_TBN;
+        in vec4 v_PositionFromLight;  // Add input from vertex shader
 
         uniform vec3 u_CameraPosition;
         uniform vec4 u_BaseColorFactor;
@@ -14399,7 +14410,10 @@ class GPUResourceManager {
         uniform sampler2D u_MetallicRoughnessSampler;
         uniform sampler2D u_OcclusionSampler;
         uniform sampler2D u_EmissiveSampler;
+        uniform sampler2DShadow u_ShadowMap;  // Must be sampler2DShadow type
         uniform bool u_UseNormalMap;
+        uniform bool u_UseShadowMap;
+        uniform float u_ShadowBias;  // Bias to prevent shadow acne
 
         layout(location = 0) out vec4 fragColor;
 
@@ -14512,6 +14526,29 @@ class GPUResourceManager {
             return (diffuse + specular) * light.color * light.intensity * NdotL * attenuation;
         }
 
+        float calculateShadow(vec4 fragPosLightSpace) {
+            if (!u_UseShadowMap) return 1.0;
+            
+            // Perform perspective divide
+            vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+            
+            // Transform to [0,1] range
+            projCoords = projCoords * 0.5 + 0.5;
+            
+            // Basic bounds check
+            if (projCoords.x < 0.0 || projCoords.x > 1.0 || 
+                projCoords.y < 0.0 || projCoords.y > 1.0 || 
+                projCoords.z > 1.0) {
+                return 1.0;
+            }
+            
+            // Add bias to avoid shadow acne
+            float currentDepth = projCoords.z - u_ShadowBias;
+            
+            // Use vec3 where z is the comparison value
+            return texture(u_ShadowMap, vec3(projCoords.xy, currentDepth));
+        }
+
         void main() {
             vec3 N = getNormal();
             vec3 V = normalize(u_CameraPosition - v_Position);
@@ -14528,11 +14565,14 @@ class GPUResourceManager {
             
             // Calculate lighting
             vec3 color = vec3(0.0);
+            float shadow = calculateShadow(v_PositionFromLight);
+            
             for(int i = 0; i < MAX_LIGHTS; i++) {
-                color += calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
+                vec3 lightContrib = calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
+                color += lightContrib * shadow;
             }
             
-            // Add ambient and emissive
+            // Add ambient and emissive (unaffected by shadows)
             vec3 ambient = vec3(0.03) * baseColor * aoSample;
             vec3 emissive = SRGBtoLinear(emissiveSample.rgb);
             color += ambient + emissive;
@@ -14654,6 +14694,30 @@ class GPUResourceManager {
         this.lights[index].spotAngle = angle;
         this.lights[index].spotPenumbra = penumbra;
         this.dirtyLightParams = true;
+    }
+    setShadowMapUniforms(shader, enabled, shadowMap = null, lightViewProjection = null, bias = 0.005) {
+        this.gl.useProgram(shader);
+        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        if (useShadowMapLoc) {
+            this.gl.uniform1i(useShadowMapLoc, enabled ? 1 : 0);
+        }
+        if (enabled && shadowMap && lightViewProjection) {
+            // Use texture unit 10 for shadow map
+            this.gl.activeTexture(this.gl.TEXTURE10); // Changed from TEXTURE7
+            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
+            const shadowMapLoc = this.gl.getUniformLocation(shader, 'u_ShadowMap');
+            if (shadowMapLoc) {
+                this.gl.uniform1i(shadowMapLoc, 10); // Tell shader to use texture unit 10
+            }
+            const lightVPLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjection');
+            if (lightVPLoc) {
+                this.gl.uniformMatrix4fv(lightVPLoc, false, lightViewProjection);
+            }
+            const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+            if (biasLoc) {
+                this.gl.uniform1f(biasLoc, bias);
+            }
+        }
     }
 }
 // ShaderSystem for managing shaders and programs
@@ -15622,7 +15686,7 @@ class ShadowMapManager {
                 void main() {
                     // Compare with a fixed ref value = 0.5 for demonstration.
                     // Values in the texture < 0.5 become "1," others become "0," possibly plus PCF if filters are set to LINEAR.
-                    float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.5));
+                    float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.9999999999999999));
                     outColor = vec4(vec3(shadowResult), 1.0);
                 }`;
                 this.debugShaderProgram = this.createShaderProgram(vertexShaderSource, fragmentShaderSource);
@@ -15865,17 +15929,17 @@ class InstanceManager {
         }
         this.gpuResources.gpuResourceCache.cacheModelMode();
         if (this.shadowMapManager) {
-            debugger;
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
             this.shadowMapManager.renderAllShadowMaps(this);
         }
+        // Set shadow map uniforms from shadowMapData lightId 0
+        const shadowMapData = this.shadowMapManager.getShadowData(0);
+        this.gpuResources.setShadowMapUniforms(this.defaultShaderProgram, shadowMapData !== null, // Enable only if we have shadow data
+        (shadowMapData === null || shadowMapData === void 0 ? void 0 : shadowMapData.texture) || null, shadowMapData ? multiply(create$3(), shadowMapData.projection, shadowMapData.view) : null);
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
-        if (this.shadowMapManager) {
-            // Render debug shadow maps
-            this.shadowMapManager.renderShadowMapDebug(0);
-        }
+        if (this.shadowMapManager) ;
         this.gpuResources.gpuResourceCache.restoreModelMode();
         if (runtime)
             renderer.SetTexture(null);

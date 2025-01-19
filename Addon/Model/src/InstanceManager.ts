@@ -195,10 +195,18 @@ export class InstanceManager implements IInstanceManager {
         this.gpuResources.gpuResourceCache.cacheModelMode();
 
         if (this.shadowMapManager) {
-            debugger;
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
             this.shadowMapManager.renderAllShadowMaps(this);
         }
+
+        // Set shadow map uniforms from shadowMapData lightId 0
+        const shadowMapData = this.shadowMapManager.getShadowData(0);
+        this.gpuResources.setShadowMapUniforms(
+            this.defaultShaderProgram,
+            shadowMapData !== null, // Enable only if we have shadow data
+            shadowMapData?.texture || null,
+            shadowMapData ? mat4.multiply(mat4.create(), shadowMapData.projection, shadowMapData.view) : null
+        );
 
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);

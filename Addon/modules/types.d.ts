@@ -177,6 +177,7 @@ export interface IGPUResourceManager {
     setLightIntensity(index: number, intensity: number): void;
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
     bindShaderAndMaterial(shader: WebGLProgram, materialIndex: number, modelData: ModelData): void;
+    setShadowMapUniforms(shader: WebGLProgram, enabled: boolean, shadowMap: WebGLTexture | null, lightViewProjection: mat4 | null): void;
     gpuResourceCache: IGPUResourceCache;
     lights: Light[];
 }

@@ -1,6 +1,7 @@
 import { ModelError, ModelErrorCode } from './errors';
 import { GPUResourceCache } from './GPUResourceCache';
 import { IGPUResourceManager, IGPUResourceCache, Light, ModelData } from './types';
+import { mat4 } from 'gl-matrix';
 
 export class GPUResourceManager implements IGPUResourceManager {
     private gl: WebGL2RenderingContext;
@@ -179,10 +180,14 @@ export class GPUResourceManager implements IGPUResourceManager {
         uniform mat3 u_NormalMatrix;
         uniform mat4 u_NodeMatrix;
         uniform bool u_UseSkinning;
+        uniform bool u_UseShadowMap;
+        uniform mat4 u_LightViewProjection;  // Light's view-projection matrix
+
         out vec2 v_UV;
         out vec3 v_Normal;
         out vec3 v_Position;
         out mat3 v_TBN;
+        out vec4 v_PositionFromLight;  // Add position from light's perspective
 
         void main() {
             v_UV = uv;
@@ -226,12 +231,18 @@ export class GPUResourceManager implements IGPUResourceManager {
             // Create TBN matrix for transforming from tangent space to world space
             v_TBN = mat3(T, B, N);
             
+            // Calculate position from light's perspective for shadow mapping
+            if (u_UseShadowMap) {
+                vec4 worldPos = u_Model * (u_UseSkinning ? skinVertex : vec4(position, 1.0));
+                v_PositionFromLight = u_LightViewProjection * worldPos;
+            }
         }`;
 
         const fragmentShader = `#version 300 es
         #extension GL_EXT_shader_texture_lod : enable
         #extension GL_OES_standard_derivatives : enable
         precision highp float;
+        precision highp sampler2DShadow;  // Match ShadowMapManager's precision
 
         // Light structure matching TypeScript definitions
         struct Light {
@@ -253,6 +264,7 @@ export class GPUResourceManager implements IGPUResourceManager {
         in vec3 v_Normal;
         in vec3 v_Position;
         in mat3 v_TBN;
+        in vec4 v_PositionFromLight;  // Add input from vertex shader
 
         uniform vec3 u_CameraPosition;
         uniform vec4 u_BaseColorFactor;
@@ -265,7 +277,10 @@ export class GPUResourceManager implements IGPUResourceManager {
         uniform sampler2D u_MetallicRoughnessSampler;
         uniform sampler2D u_OcclusionSampler;
         uniform sampler2D u_EmissiveSampler;
+        uniform sampler2DShadow u_ShadowMap;  // Must be sampler2DShadow type
         uniform bool u_UseNormalMap;
+        uniform bool u_UseShadowMap;
+        uniform float u_ShadowBias;  // Bias to prevent shadow acne
 
         layout(location = 0) out vec4 fragColor;
 
@@ -378,6 +393,29 @@ export class GPUResourceManager implements IGPUResourceManager {
             return (diffuse + specular) * light.color * light.intensity * NdotL * attenuation;
         }
 
+        float calculateShadow(vec4 fragPosLightSpace) {
+            if (!u_UseShadowMap) return 1.0;
+            
+            // Perform perspective divide
+            vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+            
+            // Transform to [0,1] range
+            projCoords = projCoords * 0.5 + 0.5;
+            
+            // Basic bounds check
+            if (projCoords.x < 0.0 || projCoords.x > 1.0 || 
+                projCoords.y < 0.0 || projCoords.y > 1.0 || 
+                projCoords.z > 1.0) {
+                return 1.0;
+            }
+            
+            // Add bias to avoid shadow acne
+            float currentDepth = projCoords.z - u_ShadowBias;
+            
+            // Use vec3 where z is the comparison value
+            return texture(u_ShadowMap, vec3(projCoords.xy, currentDepth));
+        }
+
         void main() {
             vec3 N = getNormal();
             vec3 V = normalize(u_CameraPosition - v_Position);
@@ -394,11 +432,14 @@ export class GPUResourceManager implements IGPUResourceManager {
             
             // Calculate lighting
             vec3 color = vec3(0.0);
+            float shadow = calculateShadow(v_PositionFromLight);
+            
             for(int i = 0; i < MAX_LIGHTS; i++) {
-                color += calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
+                vec3 lightContrib = calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
+                color += lightContrib * shadow;
             }
             
-            // Add ambient and emissive
+            // Add ambient and emissive (unaffected by shadows)
             vec3 ambient = vec3(0.03) * baseColor * aoSample;
             vec3 emissive = SRGBtoLinear(emissiveSample.rgb);
             color += ambient + emissive;
@@ -533,6 +574,41 @@ export class GPUResourceManager implements IGPUResourceManager {
         this.lights[index].spotAngle = angle;
         this.lights[index].spotPenumbra = penumbra;
         this.dirtyLightParams = true;
+    }
+
+    setShadowMapUniforms(
+        shader: WebGLProgram, 
+        enabled: boolean, 
+        shadowMap: WebGLTexture | null = null,
+        lightViewProjection: mat4 | null = null,
+        bias: number = 0.005
+    ): void {
+        this.gl.useProgram(shader);
+        
+        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        if (useShadowMapLoc) {
+            this.gl.uniform1i(useShadowMapLoc, enabled ? 1 : 0);
+        }
+
+        if (enabled && shadowMap && lightViewProjection) {
+            // Use texture unit 10 for shadow map
+            this.gl.activeTexture(this.gl.TEXTURE10);  // Changed from TEXTURE7
+            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
+            const shadowMapLoc = this.gl.getUniformLocation(shader, 'u_ShadowMap');
+            if (shadowMapLoc) {
+                this.gl.uniform1i(shadowMapLoc, 10);  // Tell shader to use texture unit 10
+            }
+
+            const lightVPLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjection');
+            if (lightVPLoc) {
+                this.gl.uniformMatrix4fv(lightVPLoc, false, lightViewProjection);
+            }
+
+            const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+            if (biasLoc) {
+                this.gl.uniform1f(biasLoc, bias);
+            }
+        }
     }
 }
 

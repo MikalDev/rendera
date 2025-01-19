@@ -651,7 +651,7 @@ export class ShadowMapManager {
                 void main() {
                     // Compare with a fixed ref value = 0.5 for demonstration.
                     // Values in the texture < 0.5 become "1," others become "0," possibly plus PCF if filters are set to LINEAR.
-                    float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.5));
+                    float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.9999999999999999));
                     outColor = vec4(vec3(shadowResult), 1.0);
                 }`;
 
