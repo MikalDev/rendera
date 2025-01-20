@@ -76,11 +76,11 @@
         const instance5 = instanceManager.createModel(model5.id);
         //const instance3 = instanceManager.createModel(model.id);
         instance.setRotation([ 0, 0.0, 0.0, 0 ]);
-        instance.setPosition(0, -150, 0);
+        instance.setPosition(0, -150, -50);
         instance.setScale(50, 50, 50);
 
         instance2.setRotation([0.0, 0.0, 0.0, 1.0]);
-        instance2.setPosition(0, 60, 0);
+        instance2.setPosition(0, 60, -100);
         instance2.setScale(30, 30, 30);
 
         instance3.setRotation([0.0, 0.0, 0.0, 1.0]);
@@ -92,7 +92,7 @@
         instance4.setScale(100, 100, 100);
 
         instance5.setRotation([0.707, 0.0, 0.0, 0.707]);
-        instance5.setPosition(-150, 0, -100);
+        instance5.setPosition(-150, -100, -100);
         instance5.setScale(0.2, 0.2, 0.2);
 
         console.log('Instance set');
@@ -102,9 +102,9 @@
             enabled: true,
             position: [0, 0, 400],
             color: [1.0, 1.0, 1.0],
-            intensity: 2.0,
+            intensity: 4.0,
             attenuation: 0.0000001,
-            direction: [0.5, -0.5, -1]
+            direction: [0.5, 0.5, -1]
         });
         /*
         gpuResourceManager.updateLight(1, {
@@ -182,7 +182,7 @@
             instance.updateAnimation(0.007);
             instance2.updateAnimation(0.008);
             // instance3.updateAnimation(0.001);
-            instance5.updateAnimation(0.001);
+            instance5.updateAnimation(0.004);
             rotation += 0.01;
             /*
             instance.setQuaternion(
