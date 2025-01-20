@@ -41,6 +41,7 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     setLightIntensity(index: number, intensity: number): void;
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
     setShadowMapUniforms(shader: WebGLProgram, enabled: boolean, shadowMap?: WebGLTexture | null, lightViewProjection?: mat4 | null, bias?: number): void;
+    getShadowMapShader(): WebGLProgram;
 }
 export declare class ShaderSystem {
     private gl;

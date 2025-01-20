@@ -1,5 +1,5 @@
 import { mat4, vec3 } from 'gl-matrix';
-import type { Light, DirectionalLight } from './types';
+import type { Light, DirectionalLight, IGPUResourceManager } from './types';
 import type { InstanceManager } from './InstanceManager';
 
 const SHADOW_MAP_CONSTANTS = {
@@ -68,12 +68,14 @@ interface SceneBounds {
  * Currently supports directional lights, with architecture ready for spot and point lights.
  */
 export class ShadowMapManager {
+    private gpuResourceManager: IGPUResourceManager;
     private gl: WebGL2RenderingContext;
     private shadowMaps: Map<number, ShadowMapData>;
-    private resolution: number;
     private filterMode: ShadowFilterMode;
     private format: ShadowMapFormat;
+    private resolution: number = 4096;
     private sceneBounds: SceneBounds | null;
+    private shadowMapShader: WebGLProgram;
     /** Default scene bounds used when no specific bounds are set */
     private static readonly DEFAULT_BOUNDS: SceneBounds = {
         min: vec3.fromValues(-1000, -1000, -1000),
@@ -92,13 +94,14 @@ export class ShadowMapManager {
      * Creates a new ShadowMapManager instance.
      * @param gl - The WebGL2 context to use for rendering
      */
-    constructor(gl: WebGL2RenderingContext) {
+    constructor(gl: WebGL2RenderingContext, gpuResourceManager: IGPUResourceManager) {
+        this.gpuResourceManager = gpuResourceManager;
         this.gl = gl;
         this.shadowMaps = new Map();
-        this.resolution = 1024; // Default resolution
         this.filterMode = ShadowFilterMode.LINEAR; // Default to linear for better quality
         this.format = ShadowMapFormat.DEPTH24_UINT; // Default to 24-bit depth
         this.sceneBounds = ShadowMapManager.DEFAULT_BOUNDS;
+        this.shadowMapShader = this.gpuResourceManager.getShadowMapShader();
     }
 
     /**
@@ -108,7 +111,7 @@ export class ShadowMapManager {
      * @param format - The format to use for shadow maps (default: DEPTH24_UINT)
      */
     initialize(
-        resolution: number = 1024, 
+        resolution: number = 4096, 
         filterMode: ShadowFilterMode = ShadowFilterMode.LINEAR,
         format: ShadowMapFormat = ShadowMapFormat.DEPTH24_UINT
     ): void {
@@ -336,21 +339,26 @@ export class ShadowMapManager {
         vec3.scale(center, center, 0.5);
         vec3.sub(size, bounds.max, bounds.min);
 
+        // Calculate the maximum scene dimension
+        const maxSize = Math.max(size[0], size[1], size[2]);
+
         // Create view matrix looking from light direction
-        const up = Math.abs(light.direction[1]) > 0.99 ? vec3.fromValues(1, 0, 0) : vec3.fromValues(0, 1, 0);
+        const lightDir = vec3.create();
+        // Negate the light direction to get the correct shadow direction
+        vec3.negate(lightDir, light.direction);
+        
+        const lightPos = vec3.create();
+        vec3.scaleAndAdd(lightPos, center, lightDir, maxSize);
+
+        const up = Math.abs(lightDir[1]) > 0.99 ? vec3.fromValues(1, 0, 0) : vec3.fromValues(0, 1, 0);
         mat4.lookAt(
             this.matrixPool.view,
-            vec3.fromValues(
-                center[0] + light.direction[0],
-                center[1] + light.direction[1],
-                center[2] + light.direction[2]
-            ),
+            lightPos,
             center,
             up
         );
 
         // Create orthographic projection that encompasses the scene
-        const maxSize = Math.max(size[0], size[1], size[2]);
         mat4.ortho(
             this.matrixPool.projection,
             -maxSize/2, maxSize/2,
@@ -441,7 +449,7 @@ export class ShadowMapManager {
 
     renderInstances(instanceManager: InstanceManager, shadowData: ShadowMapData): void {
         for (const [modelId, instanceGroup] of instanceManager.instancesByModel) {
-            instanceManager.renderModelInstances(modelId, instanceGroup, { view: shadowData.view, projection: shadowData.projection });
+            instanceManager.renderShadowMapInstances(modelId, instanceGroup, { view: shadowData.view, projection: shadowData.projection });
         }
     }
 
@@ -587,6 +595,7 @@ export class ShadowMapManager {
      * @param instanceManager - The instance manager that will render the scene
      */
     renderAllShadowMaps(instanceManager: InstanceManager): void {
+        // For each light that casts shadows
         for (const [lightId, shadowData] of this.shadowMaps) {
             if (shadowData.light.enabled) {
                 this.renderShadowMap(lightId, instanceManager);

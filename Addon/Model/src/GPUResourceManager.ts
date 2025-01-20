@@ -610,6 +610,55 @@ export class GPUResourceManager implements IGPUResourceManager {
             }
         }
     }
+
+    getShadowMapShader(): WebGLProgram {
+        const vertexShader = `#version 300 es
+        precision highp float;
+        precision highp int;
+        
+        layout(location = 0) in vec3 position;
+        layout(location = 1) in vec3 normal;
+        layout(location = 2) in vec2 uv;
+        layout(location = 3) in uvec4 joints;
+        layout(location = 4) in vec4 weights;
+        layout(location = 5) in vec4 tangent;
+
+        const int MAX_BONES = 64;
+
+        uniform mat4 u_Model;
+        uniform mat4 u_NodeMatrix;
+        uniform mat4 u_LightViewProjection;
+        uniform bool u_UseSkinning;
+        uniform mat4 u_BoneMatrices[MAX_BONES];
+
+        void main() {
+            // Set position to the vertex position
+            vec3 nPosition = position;
+            
+            if (u_UseSkinning) {
+                vec4 skinVertex = vec4(0.0);
+                for (int i = 0; i < 4; i++) {
+                    uint joint = joints[i];
+                    skinVertex += weights[i] * (u_BoneMatrices[joint] * vec4(position, 1.0));
+                }
+                gl_Position = u_LightViewProjection * u_Model * skinVertex;
+            } else {
+                gl_Position = u_LightViewProjection * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
+            }
+        }`;
+
+        const fragmentShader = `#version 300 es
+        precision highp float;
+        
+        layout(location = 0) out vec4 fragColor;  // Add required output declaration
+
+        void main() {
+            // No color output needed for shadow map
+            // The depth is automatically written
+        }`;
+
+        return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
+    }
 }
 
 // ShaderSystem for managing shaders and programs

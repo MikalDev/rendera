@@ -47,6 +47,10 @@ export declare class InstanceManager implements IInstanceManager {
         view: mat4;
         projection: mat4;
     }): void;
+    renderShadowMapInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
+        view: mat4;
+        projection: mat4;
+    }): void;
     private startAnimation;
     private cleanupInstance;
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;

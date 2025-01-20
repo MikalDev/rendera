@@ -13131,6 +13131,36 @@ function scale(out, a, b) {
   return out;
 }
 /**
+ * Adds two vec3's after scaling the second operand by a scalar value
+ *
+ * @param {vec3} out the receiving vector
+ * @param {ReadonlyVec3} a the first operand
+ * @param {ReadonlyVec3} b the second operand
+ * @param {Number} scale the amount to scale b by before adding
+ * @returns {vec3} out
+ */
+
+function scaleAndAdd(out, a, b, scale) {
+  out[0] = a[0] + b[0] * scale;
+  out[1] = a[1] + b[1] * scale;
+  out[2] = a[2] + b[2] * scale;
+  return out;
+}
+/**
+ * Negates the components of a vec3
+ *
+ * @param {vec3} out the receiving vector
+ * @param {ReadonlyVec3} a vector to negate
+ * @returns {vec3} out
+ */
+
+function negate(out, a) {
+  out[0] = -a[0];
+  out[1] = -a[1];
+  out[2] = -a[2];
+  return out;
+}
+/**
  * Normalize a vec3
  *
  * @param {vec3} out the receiving vector
@@ -14719,6 +14749,52 @@ class GPUResourceManager {
             }
         }
     }
+    getShadowMapShader() {
+        const vertexShader = `#version 300 es
+        precision highp float;
+        precision highp int;
+        
+        layout(location = 0) in vec3 position;
+        layout(location = 1) in vec3 normal;
+        layout(location = 2) in vec2 uv;
+        layout(location = 3) in uvec4 joints;
+        layout(location = 4) in vec4 weights;
+        layout(location = 5) in vec4 tangent;
+
+        const int MAX_BONES = 64;
+
+        uniform mat4 u_Model;
+        uniform mat4 u_NodeMatrix;
+        uniform mat4 u_LightViewProjection;
+        uniform bool u_UseSkinning;
+        uniform mat4 u_BoneMatrices[MAX_BONES];
+
+        void main() {
+            // Set position to the vertex position
+            vec3 nPosition = position;
+            
+            if (u_UseSkinning) {
+                vec4 skinVertex = vec4(0.0);
+                for (int i = 0; i < 4; i++) {
+                    uint joint = joints[i];
+                    skinVertex += weights[i] * (u_BoneMatrices[joint] * vec4(position, 1.0));
+                }
+                gl_Position = u_LightViewProjection * u_Model * skinVertex;
+            } else {
+                gl_Position = u_LightViewProjection * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
+            }
+        }`;
+        const fragmentShader = `#version 300 es
+        precision highp float;
+        
+        layout(location = 0) out vec4 fragColor;  // Add required output declaration
+
+        void main() {
+            // No color output needed for shadow map
+            // The depth is automatically written
+        }`;
+        return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
+    }
 }
 // ShaderSystem for managing shaders and programs
 class ShaderSystem {
@@ -15207,19 +15283,21 @@ class ShadowMapManager {
      * Creates a new ShadowMapManager instance.
      * @param gl - The WebGL2 context to use for rendering
      */
-    constructor(gl) {
+    constructor(gl, gpuResourceManager) {
+        this.resolution = 4096;
         this.matrixPool = {
             view: create$3(),
             projection: create$3()
         };
         // Add a property to cache the shader program
         this.debugShaderProgram = null;
+        this.gpuResourceManager = gpuResourceManager;
         this.gl = gl;
         this.shadowMaps = new Map();
-        this.resolution = 1024; // Default resolution
         this.filterMode = ShadowFilterMode.LINEAR; // Default to linear for better quality
         this.format = ShadowMapFormat.DEPTH24_UINT; // Default to 24-bit depth
         this.sceneBounds = ShadowMapManager.DEFAULT_BOUNDS;
+        this.shadowMapShader = this.gpuResourceManager.getShadowMapShader();
     }
     /**
      * Initializes the shadow map manager with the specified settings.
@@ -15227,7 +15305,7 @@ class ShadowMapManager {
      * @param filterMode - The filtering mode to use for shadow sampling (default: LINEAR)
      * @param format - The format to use for shadow maps (default: DEPTH24_UINT)
      */
-    initialize(resolution = 1024, filterMode = ShadowFilterMode.LINEAR, format = ShadowMapFormat.DEPTH24_UINT) {
+    initialize(resolution = 4096, filterMode = ShadowFilterMode.LINEAR, format = ShadowMapFormat.DEPTH24_UINT) {
         if (!Number.isInteger(Math.log2(resolution)) ||
             resolution < SHADOW_MAP_CONSTANTS.MIN_RESOLUTION ||
             resolution > SHADOW_MAP_CONSTANTS.MAX_RESOLUTION) {
@@ -15419,11 +15497,17 @@ class ShadowMapManager {
         add(center, bounds.max, bounds.min);
         scale(center, center, 0.5);
         sub(size, bounds.max, bounds.min);
-        // Create view matrix looking from light direction
-        const up = Math.abs(light.direction[1]) > 0.99 ? fromValues(1, 0, 0) : fromValues(0, 1, 0);
-        lookAt(this.matrixPool.view, fromValues(center[0] + light.direction[0], center[1] + light.direction[1], center[2] + light.direction[2]), center, up);
-        // Create orthographic projection that encompasses the scene
+        // Calculate the maximum scene dimension
         const maxSize = Math.max(size[0], size[1], size[2]);
+        // Create view matrix looking from light direction
+        const lightDir = create$2();
+        // Negate the light direction to get the correct shadow direction
+        negate(lightDir, light.direction);
+        const lightPos = create$2();
+        scaleAndAdd(lightPos, center, lightDir, maxSize);
+        const up = Math.abs(lightDir[1]) > 0.99 ? fromValues(1, 0, 0) : fromValues(0, 1, 0);
+        lookAt(this.matrixPool.view, lightPos, center, up);
+        // Create orthographic projection that encompasses the scene
         ortho(this.matrixPool.projection, -maxSize / 2, maxSize / 2, -maxSize / 2, maxSize / 2, 0.1, maxSize * 2);
         return { view: this.matrixPool.view, projection: this.matrixPool.projection };
     }
@@ -15499,7 +15583,7 @@ class ShadowMapManager {
     }
     renderInstances(instanceManager, shadowData) {
         for (const [modelId, instanceGroup] of instanceManager.instancesByModel) {
-            instanceManager.renderModelInstances(modelId, instanceGroup, { view: shadowData.view, projection: shadowData.projection });
+            instanceManager.renderShadowMapInstances(modelId, instanceGroup, { view: shadowData.view, projection: shadowData.projection });
         }
     }
     /**
@@ -15628,6 +15712,7 @@ class ShadowMapManager {
      * @param instanceManager - The instance manager that will render the scene
      */
     renderAllShadowMaps(instanceManager) {
+        // For each light that casts shadows
         for (const [lightId, shadowData] of this.shadowMaps) {
             if (shadowData.light.enabled) {
                 this.renderShadowMap(lightId, instanceManager);
@@ -15805,8 +15890,8 @@ class InstanceManager {
         this.modelLoader = modelLoader;
         this._animationController = new AnimationController(modelLoader);
         this.defaultShaderProgram = this.gpuResources.getDefaultShader();
-        this.shadowMapManager = new ShadowMapManager(gl);
-        this.shadowMapManager.initialize();
+        this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
+        this.shadowMapManager.initialize(1024);
     }
     initialize() {
         // Log WebGL context attributes
@@ -16100,6 +16185,71 @@ class InstanceManager {
                     // 5. Bind material properties (textures and uniforms)
                     this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, primitive.material, modelData);
                     // 6. Draw
+                    if (primitive.indexBuffer) {
+                        this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
+                    }
+                    else {
+                        this.gl.drawArrays(this.gl.TRIANGLES, 0, primitive.vertexCount);
+                    }
+                }
+            }
+        }
+    }
+    renderShadowMapInstances(modelId, instanceGroup, viewProjection) {
+        const modelData = this.modelLoader.getModelData(modelId);
+        if (!modelData)
+            return;
+        // Get shadow map shader
+        const shadowShader = this.gpuResources.getShadowMapShader();
+        this.gl.useProgram(shadowShader);
+        // For each instance
+        for (const instanceId of instanceGroup) {
+            const instance = this.instances.get(instanceId);
+            if (!instance)
+                continue;
+            // Update world matrix
+            this.updateWorldMatrix(instance);
+            // For each mesh in the model
+            for (const renderableNode of modelData.renderableNodes) {
+                const mesh = renderableNode.modelMesh;
+                for (const primitive of mesh.primitives) {
+                    // 1. Bind VAO
+                    this.gl.bindVertexArray(primitive.vao);
+                    // 2. Set minimal required uniforms for shadow mapping
+                    const viewProjLoc = this.gl.getUniformLocation(shadowShader, 'u_LightViewProjection');
+                    const modelMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_Model');
+                    const nodeMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_NodeMatrix');
+                    const nodeBonesMatricesLoc = this.gl.getUniformLocation(shadowShader, 'u_BoneMatrices');
+                    const useSkinningLoc = this.gl.getUniformLocation(shadowShader, 'u_UseSkinning');
+                    // Combine view and projection for efficiency
+                    const lightViewProj = multiply(create$3(), viewProjection.projection, viewProjection.view);
+                    this.gl.uniformMatrix4fv(viewProjLoc, false, lightViewProj);
+                    this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
+                    // Handle animation matrices if present
+                    const animationState = instance.animationState;
+                    const animationMatrices = animationState.animationMatrices;
+                    const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    if (nodeMatrixLoc) {
+                        if (animationMatrix) {
+                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix);
+                        }
+                        else {
+                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, create$3());
+                        }
+                    }
+                    // Handle skinning
+                    let noBoneMatrices = true;
+                    if (nodeBonesMatricesLoc) {
+                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                        if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                            this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
+                            noBoneMatrices = false;
+                        }
+                    }
+                    if (useSkinningLoc) {
+                        this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
+                    }
+                    // Draw
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
                     }
