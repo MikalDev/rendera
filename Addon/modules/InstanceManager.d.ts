@@ -10,6 +10,7 @@ export declare class InstanceManager implements IInstanceManager {
     private instances;
     instancesByModel: Map<string, Set<number>>;
     private defaultShaderProgram;
+    private shadowMapShader;
     private shadowMapManager;
     private instanceBuffers;
     private nextInstanceId;

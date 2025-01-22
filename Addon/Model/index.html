@@ -85,7 +85,7 @@
 
         instance3.setRotation([0.0, 0.0, 0.0, 1.0]);
         instance3.setPosition(0, 0, -200);
-        instance3.setScale(500, 500, 50);
+        instance3.setScale(200, 200, 50);
 
         instance4.setRotation([0.707, 0.0, 0.0, 0.707]);
         instance4.setPosition(150, 0, -150);
@@ -96,6 +96,7 @@
         instance5.setScale(0.2, 0.2, 0.2);
 
         console.log('Instance set');
+        
         gpuResourceManager.updateLight(0, {
             type: 'directional',
             castShadows: true,
@@ -107,17 +108,20 @@
             direction: [0.5, 0.5, -1]
         });
         /*
-        gpuResourceManager.updateLight(1, {
+        gpuResourceManager.updateLight(0, {
             type: 'spot',
+            castShadows: true,
             enabled: true,
-            position: [-100, 30, 400],
+            position: [-450, 0, 400],
             color: [1.0, 0, 0],
             intensity: 4.0,
             attenuation: 0.0000001,
-            direction: [0, 0, -1],
-            spotAngle: 0.99,
-            spotPenumbra: 0.00
+            direction: [0.707, 0.1, -0.707],
+            spotAngle: 0.95,
+            spotPenumbra: 0.1
         });
+        */
+        /*
         gpuResourceManager.updateLight(2, {
             type: 'spot',
             enabled: true,
@@ -179,10 +183,10 @@
             // Clear color and depth buffers
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             // Animate the instance
-            instance.updateAnimation(0.007);
-            instance2.updateAnimation(0.008);
-            // instance3.updateAnimation(0.001);
-            instance5.updateAnimation(0.004);
+            instance.updateAnimation(0.01);
+            instance2.updateAnimation(0.01);
+            instance3.updateAnimation(0.004);
+            instance5.updateAnimation(0.01);
             rotation += 0.01;
             /*
             instance.setQuaternion(

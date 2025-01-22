@@ -13086,6 +13086,22 @@ function fromValues(x, y, z) {
   return out;
 }
 /**
+ * Set the components of a vec3 to the given values
+ *
+ * @param {vec3} out the receiving vector
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @param {Number} z Z component
+ * @returns {vec3} out
+ */
+
+function set(out, x, y, z) {
+  out[0] = x;
+  out[1] = y;
+  out[2] = z;
+  return out;
+}
+/**
  * Adds two vec3's
  *
  * @param {vec3} out the receiving vector
@@ -14390,13 +14406,11 @@ class GPUResourceManager {
                     skinnedTangent += weights[i] * (mat3(u_BoneMatrices[joint]) * tangent.xyz);
                 }
                 gl_Position = u_Projection * u_View * u_Model * skinVertex;
-                // gl_Position = u_Projection * u_View * u_NodeMatrix * skinVertex;
                 v_Position = (u_Model * skinVertex).xyz;
                 N = normalize(u_NormalMatrix * skinnedNormal);
                 T = normalize(u_NormalMatrix * skinnedTangent.xyz);
             } else {
                 gl_Position = u_Projection * u_View * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
-                // gl_Position = u_Projection * u_View * u_Model * vec4(nPosition, 1.0);
                 v_Position = (u_Model * u_NodeMatrix * vec4(nPosition, 1.0)).xyz;
                 N = normalize(u_NormalMatrix * normal);
                 T = normalize(u_NormalMatrix * tangent.xyz);
@@ -14405,12 +14419,17 @@ class GPUResourceManager {
             vec3 B = normalize(cross(N, T)) * handedness;
             
             v_Normal = N;
-            // Create TBN matrix for transforming from tangent space to world space
             v_TBN = mat3(T, B, N);
             
             // Calculate position from light's perspective for shadow mapping
             if (u_UseShadowMap) {
-                vec4 worldPos = u_Model * (u_UseSkinning ? skinVertex : vec4(position, 1.0));
+                // Fix: Use consistent world position calculation for both skinned and non-skinned
+                vec4 worldPos;
+                if (u_UseSkinning) {
+                    worldPos = u_Model * skinVertex;
+                } else {
+                    worldPos = u_Model * u_NodeMatrix * vec4(position, 1.0);
+                }
                 v_PositionFromLight = u_LightViewProjection * worldPos;
             }
         }`;
@@ -14584,12 +14603,62 @@ class GPUResourceManager {
                 projCoords.z > 1.0) {
                 return 1.0;
             }
+
+            // Get the light for shadow calculations (assuming first light casts shadows)
+            Light light = u_Lights[0];
+            
+            // Calculate bias based on surface angle and light type
+            float bias = u_ShadowBias;
+            vec3 normal = getNormal();
+            vec3 lightDir;
+            
+            if (light.type == 1) { // Directional light
+                lightDir = normalize(-light.direction);
+            } else { // Point or spot light
+                lightDir = normalize(light.position - v_Position);
+            }
+            
+            float cosTheta = max(dot(normal, lightDir), 0.0);
+            bias *= tan(acos(cosTheta));
+            bias = clamp(bias, 0.0, 0.01);
             
             // Add bias to avoid shadow acne
-            float currentDepth = projCoords.z - u_ShadowBias;
+            float currentDepth = projCoords.z - bias;
             
-            // Use vec3 where z is the comparison value
-            return texture(u_ShadowMap, vec3(projCoords.xy, currentDepth));
+            // PCF sampling for soft shadows
+            float shadow = 0.0;
+            vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMap, 0));
+            const int SAMPLE_RADIUS = 2;
+            const float SAMPLES = float((SAMPLE_RADIUS * 2 + 1) * (SAMPLE_RADIUS * 2 + 1));
+            
+            for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
+                for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
+                    vec2 offset = vec2(float(x), float(y)) * texelSize;
+                    shadow += texture(u_ShadowMap, vec3(projCoords.xy + offset, currentDepth));
+                }
+            }
+            shadow /= SAMPLES;
+
+            // For spotlights, check if fragment is within the light cone
+            if (light.type == 2) { // Spot light
+                vec3 lightToFrag = normalize(v_Position - light.position);
+                float cosAngle = dot(lightToFrag, normalize(light.direction));
+                float cosSpotOuter = cos(light.spotAngle * (1.0 - light.spotPenumbra));
+                
+                // If outside the outer cone, fully shadowed
+                if (cosAngle < cosSpotOuter) {
+                    return 0.0;
+                }
+                
+                // Smooth transition at cone edges
+                float cosSpotInner = cos(light.spotAngle);
+                if (cosAngle < cosSpotInner) {
+                    float spotFactor = smoothstep(cosSpotOuter, cosSpotInner, cosAngle);
+                    shadow *= spotFactor;
+                }
+            }
+            
+            return shadow;
         }
 
         void main() {
@@ -14768,11 +14837,8 @@ class GPUResourceManager {
         precision highp int;
         
         layout(location = 0) in vec3 position;
-        layout(location = 1) in vec3 normal;
-        layout(location = 2) in vec2 uv;
         layout(location = 3) in uvec4 joints;
         layout(location = 4) in vec4 weights;
-        layout(location = 5) in vec4 tangent;
 
         const int MAX_BONES = 64;
 
@@ -14800,8 +14866,6 @@ class GPUResourceManager {
         const fragmentShader = `#version 300 es
         precision highp float;
         
-        layout(location = 0) out vec4 fragColor;  // Add required output declaration
-
         void main() {
             // No color output needed for shadow map
             // The depth is automatically written
@@ -15311,10 +15375,11 @@ class ShadowMapManager {
         this.format = ShadowMapFormat.DEPTH24_UINT; // Default to 24-bit depth
         this.sceneBounds = ShadowMapManager.DEFAULT_BOUNDS;
         this.shadowMapShader = this.gpuResourceManager.getShadowMapShader();
+        console.log('ShadowMapManager constructor');
     }
     /**
      * Initializes the shadow map manager with the specified settings.
-     * @param resolution - The resolution of the shadow maps in pixels (default: 1024)
+     * @param resolution - The resolution of the shadow maps in pixels
      * @param filterMode - The filtering mode to use for shadow sampling (default: LINEAR)
      * @param format - The format to use for shadow maps (default: DEPTH24_UINT)
      */
@@ -15525,6 +15590,60 @@ class ShadowMapManager {
         return { view: this.matrixPool.view, projection: this.matrixPool.projection };
     }
     /**
+     * Calculates the view-projection matrix for a spot light.
+     * Creates a perspective projection based on the spot light's angle and position.
+     *
+     * @param light - The spot light to calculate the matrix for
+     * @param bounds - The scene bounds to encompass in the shadow map
+     * @returns The calculated view-projection matrix for shadow mapping
+     * @private
+     */
+    calculateSpotLightMatrix(light, bounds) {
+        // Use pool matrices directly
+        identity(this.matrixPool.view);
+        identity(this.matrixPool.projection);
+        this.validateBounds(bounds);
+        // Normalize the light direction
+        const normalizedDir = create$2();
+        normalize$2(normalizedDir, light.direction);
+        // Calculate view matrix from light's position and direction
+        const target = create$2();
+        scaleAndAdd(target, light.position, normalizedDir, 1.0);
+        // Calculate up vector ensuring it's perpendicular to light direction
+        const up = create$2();
+        if (Math.abs(normalizedDir[1]) > 0.99) {
+            set(up, 1, 0, 0); // Use X axis if light is pointing along Y
+        }
+        else {
+            set(up, 0, 1, 0); // Default to Y up
+            const right = create$2();
+            cross(right, normalizedDir, up);
+            normalize$2(right, right);
+            cross(up, right, normalizedDir);
+            normalize$2(up, up);
+        }
+        lookAt(this.matrixPool.view, light.position, target, up);
+        // Calculate the distance to the bounds for near/far planes
+        const center = create$2();
+        add(center, bounds.max, bounds.min);
+        scale(center, center, 0.5);
+        const lightToCenter = create$2();
+        sub(lightToCenter, center, light.position);
+        const distanceToCenter = length(lightToCenter);
+        const size = create$2();
+        sub(size, bounds.max, bounds.min);
+        const maxSize = Math.max(size[0], size[1], size[2]);
+        // Calculate near and far planes
+        const nearPlane = Math.max(0.1, distanceToCenter - maxSize);
+        const farPlane = distanceToCenter + maxSize;
+        // Convert spotAngle from degrees to radians and double it for full cone angle
+        const fovY = (light.spotAngle * 2) * Math.PI / 180;
+        // Create perspective projection
+        perspective(this.matrixPool.projection, fovY, 1.0, // Using 1.0 for aspect ratio since shadow maps are typically square
+        nearPlane, farPlane);
+        return { view: this.matrixPool.view, projection: this.matrixPool.projection };
+    }
+    /**
      * Updates the shadow map data for a light, creating resources if needed.
      * Should be called when light properties change or scene bounds are updated.
      * For directional lights, updates the view-projection matrix based on current bounds.
@@ -15538,6 +15657,17 @@ class ShadowMapManager {
         }
         if (light.type === LightType.DIRECTIONAL && len(light.direction) === 0) {
             return;
+        }
+        if (light.type === LightType.SPOT) {
+            // Validate spotlight parameters
+            if (len(light.direction) === 0) {
+                console.warn('Spotlight direction cannot be zero vector');
+                return;
+            }
+            if (light.spotAngle <= 0 || light.spotAngle >= 90) {
+                console.warn('Spotlight angle must be between 0 and 90 degrees');
+                return;
+            }
         }
         // Get or create shadow map resources
         let shadowData = this.shadowMaps.get(lightId);
@@ -15555,8 +15685,12 @@ class ShadowMapManager {
             shadowData.view = matrices.view;
             shadowData.projection = matrices.projection;
         }
+        else if (light.type === LightType.SPOT) {
+            const matrices = this.calculateSpotLightMatrix(light, bounds);
+            shadowData.view = matrices.view;
+            shadowData.projection = matrices.projection;
+        }
         // Future light types will be handled here
-        // else if (light.type === 'spot') { ... }
         // else if (light.type === 'point') { ... }
     }
     /**
@@ -15619,12 +15753,14 @@ class ShadowMapManager {
         const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
         const currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
         const currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+        const currentScissorTest = this.gl.getParameter(this.gl.SCISSOR_TEST);
         const currentClearColor = this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
         const currentClearDepth = this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE);
         try {
             // Set up shadow rendering state
             this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, shadowData.framebuffer);
             this.gl.viewport(0, 0, this.resolution, this.resolution);
+            this.gl.disable(this.gl.SCISSOR_TEST);
             // Add before clearing
             this.gl.clearDepth(currentClearDepth);
             this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
@@ -15651,6 +15787,12 @@ class ShadowMapManager {
             // Add to state restore
             this.gl.clearColor(currentClearColor[0], currentClearColor[1], currentClearColor[2], currentClearColor[3]);
             this.gl.clearDepth(currentClearDepth);
+            if (currentScissorTest) {
+                this.gl.enable(this.gl.SCISSOR_TEST);
+            }
+            else {
+                this.gl.disable(this.gl.SCISSOR_TEST);
+            }
         }
     }
     /**
@@ -15905,6 +16047,7 @@ class InstanceManager {
         this.defaultShaderProgram = this.gpuResources.getDefaultShader();
         this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
         this.shadowMapManager.initialize(1024);
+        this.shadowMapShader = this.gpuResources.getShadowMapShader();
     }
     initialize() {
         // Log WebGL context attributes
@@ -16213,7 +16356,7 @@ class InstanceManager {
         if (!modelData)
             return;
         // Get shadow map shader
-        const shadowShader = this.gpuResources.getShadowMapShader();
+        const shadowShader = this.shadowMapShader;
         this.gl.useProgram(shadowShader);
         // For each instance
         for (const instanceId of instanceGroup) {

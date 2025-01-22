@@ -213,13 +213,11 @@ export class GPUResourceManager implements IGPUResourceManager {
                     skinnedTangent += weights[i] * (mat3(u_BoneMatrices[joint]) * tangent.xyz);
                 }
                 gl_Position = u_Projection * u_View * u_Model * skinVertex;
-                // gl_Position = u_Projection * u_View * u_NodeMatrix * skinVertex;
                 v_Position = (u_Model * skinVertex).xyz;
                 N = normalize(u_NormalMatrix * skinnedNormal);
                 T = normalize(u_NormalMatrix * skinnedTangent.xyz);
             } else {
                 gl_Position = u_Projection * u_View * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
-                // gl_Position = u_Projection * u_View * u_Model * vec4(nPosition, 1.0);
                 v_Position = (u_Model * u_NodeMatrix * vec4(nPosition, 1.0)).xyz;
                 N = normalize(u_NormalMatrix * normal);
                 T = normalize(u_NormalMatrix * tangent.xyz);
@@ -228,12 +226,17 @@ export class GPUResourceManager implements IGPUResourceManager {
             vec3 B = normalize(cross(N, T)) * handedness;
             
             v_Normal = N;
-            // Create TBN matrix for transforming from tangent space to world space
             v_TBN = mat3(T, B, N);
             
             // Calculate position from light's perspective for shadow mapping
             if (u_UseShadowMap) {
-                vec4 worldPos = u_Model * (u_UseSkinning ? skinVertex : vec4(position, 1.0));
+                // Fix: Use consistent world position calculation for both skinned and non-skinned
+                vec4 worldPos;
+                if (u_UseSkinning) {
+                    worldPos = u_Model * skinVertex;
+                } else {
+                    worldPos = u_Model * u_NodeMatrix * vec4(position, 1.0);
+                }
                 v_PositionFromLight = u_LightViewProjection * worldPos;
             }
         }`;
@@ -408,12 +411,62 @@ export class GPUResourceManager implements IGPUResourceManager {
                 projCoords.z > 1.0) {
                 return 1.0;
             }
+
+            // Get the light for shadow calculations (assuming first light casts shadows)
+            Light light = u_Lights[0];
+            
+            // Calculate bias based on surface angle and light type
+            float bias = u_ShadowBias;
+            vec3 normal = getNormal();
+            vec3 lightDir;
+            
+            if (light.type == 1) { // Directional light
+                lightDir = normalize(-light.direction);
+            } else { // Point or spot light
+                lightDir = normalize(light.position - v_Position);
+            }
+            
+            float cosTheta = max(dot(normal, lightDir), 0.0);
+            bias *= tan(acos(cosTheta));
+            bias = clamp(bias, 0.0, 0.01);
             
             // Add bias to avoid shadow acne
-            float currentDepth = projCoords.z - u_ShadowBias;
+            float currentDepth = projCoords.z - bias;
             
-            // Use vec3 where z is the comparison value
-            return texture(u_ShadowMap, vec3(projCoords.xy, currentDepth));
+            // PCF sampling for soft shadows
+            float shadow = 0.0;
+            vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMap, 0));
+            const int SAMPLE_RADIUS = 2;
+            const float SAMPLES = float((SAMPLE_RADIUS * 2 + 1) * (SAMPLE_RADIUS * 2 + 1));
+            
+            for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
+                for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
+                    vec2 offset = vec2(float(x), float(y)) * texelSize;
+                    shadow += texture(u_ShadowMap, vec3(projCoords.xy + offset, currentDepth));
+                }
+            }
+            shadow /= SAMPLES;
+
+            // For spotlights, check if fragment is within the light cone
+            if (light.type == 2) { // Spot light
+                vec3 lightToFrag = normalize(v_Position - light.position);
+                float cosAngle = dot(lightToFrag, normalize(light.direction));
+                float cosSpotOuter = cos(light.spotAngle * (1.0 - light.spotPenumbra));
+                
+                // If outside the outer cone, fully shadowed
+                if (cosAngle < cosSpotOuter) {
+                    return 0.0;
+                }
+                
+                // Smooth transition at cone edges
+                float cosSpotInner = cos(light.spotAngle);
+                if (cosAngle < cosSpotInner) {
+                    float spotFactor = smoothstep(cosSpotOuter, cosSpotInner, cosAngle);
+                    shadow *= spotFactor;
+                }
+            }
+            
+            return shadow;
         }
 
         void main() {
@@ -617,11 +670,8 @@ export class GPUResourceManager implements IGPUResourceManager {
         precision highp int;
         
         layout(location = 0) in vec3 position;
-        layout(location = 1) in vec3 normal;
-        layout(location = 2) in vec2 uv;
         layout(location = 3) in uvec4 joints;
         layout(location = 4) in vec4 weights;
-        layout(location = 5) in vec4 tangent;
 
         const int MAX_BONES = 64;
 
@@ -650,8 +700,6 @@ export class GPUResourceManager implements IGPUResourceManager {
         const fragmentShader = `#version 300 es
         precision highp float;
         
-        layout(location = 0) out vec4 fragColor;  // Add required output declaration
-
         void main() {
             // No color output needed for shadow map
             // The depth is automatically written

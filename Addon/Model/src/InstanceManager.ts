@@ -12,6 +12,7 @@ export class InstanceManager implements IInstanceManager {
     private instances: Map<number, InstanceData> = new Map();
     public instancesByModel: Map<string, Set<number>> = new Map();
     private defaultShaderProgram: WebGLProgram;
+    private shadowMapShader: WebGLProgram;
     private shadowMapManager: ShadowMapManager;
     
     // GPU instance data
@@ -37,6 +38,7 @@ export class InstanceManager implements IInstanceManager {
         this.defaultShaderProgram = this.gpuResources.getDefaultShader();
         this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
         this.shadowMapManager.initialize(1024);
+        this.shadowMapShader = this.gpuResources.getShadowMapShader();
     }
 
     initialize(): void {
@@ -437,7 +439,7 @@ export class InstanceManager implements IInstanceManager {
         if (!modelData) return;
 
         // Get shadow map shader
-        const shadowShader = this.gpuResources.getShadowMapShader()
+        const shadowShader = this.shadowMapShader;
         this.gl.useProgram(shadowShader);
 
         // For each instance

@@ -102,11 +102,12 @@ export class ShadowMapManager {
         this.format = ShadowMapFormat.DEPTH24_UINT; // Default to 24-bit depth
         this.sceneBounds = ShadowMapManager.DEFAULT_BOUNDS;
         this.shadowMapShader = this.gpuResourceManager.getShadowMapShader();
+        console.log('ShadowMapManager constructor');
     }
 
     /**
      * Initializes the shadow map manager with the specified settings.
-     * @param resolution - The resolution of the shadow maps in pixels (default: 1024)
+     * @param resolution - The resolution of the shadow maps in pixels
      * @param filterMode - The filtering mode to use for shadow sampling (default: LINEAR)
      * @param format - The format to use for shadow maps (default: DEPTH24_UINT)
      */
@@ -370,6 +371,81 @@ export class ShadowMapManager {
     }
 
     /**
+     * Calculates the view-projection matrix for a spot light.
+     * Creates a perspective projection based on the spot light's angle and position.
+     * 
+     * @param light - The spot light to calculate the matrix for
+     * @param bounds - The scene bounds to encompass in the shadow map
+     * @returns The calculated view-projection matrix for shadow mapping
+     * @private
+     */
+    private calculateSpotLightMatrix(light: SpotLight, bounds: SceneBounds): { view: mat4; projection: mat4 } {
+        // Use pool matrices directly
+        mat4.identity(this.matrixPool.view);
+        mat4.identity(this.matrixPool.projection);
+        this.validateBounds(bounds);
+
+        // Normalize the light direction
+        const normalizedDir = vec3.create();
+        vec3.normalize(normalizedDir, light.direction);
+
+        // Calculate view matrix from light's position and direction
+        const target = vec3.create();
+        vec3.scaleAndAdd(target, light.position, normalizedDir, 1.0);
+        
+        // Calculate up vector ensuring it's perpendicular to light direction
+        const up = vec3.create();
+        if (Math.abs(normalizedDir[1]) > 0.99) {
+            vec3.set(up, 1, 0, 0); // Use X axis if light is pointing along Y
+        } else {
+            vec3.set(up, 0, 1, 0); // Default to Y up
+            const right = vec3.create();
+            vec3.cross(right, normalizedDir, up);
+            vec3.normalize(right, right);
+            vec3.cross(up, right, normalizedDir);
+            vec3.normalize(up, up);
+        }
+
+        mat4.lookAt(
+            this.matrixPool.view,
+            light.position,
+            target,
+            up
+        );
+
+        // Calculate the distance to the bounds for near/far planes
+        const center = vec3.create();
+        vec3.add(center, bounds.max, bounds.min);
+        vec3.scale(center, center, 0.5);
+
+        const lightToCenter = vec3.create();
+        vec3.sub(lightToCenter, center, light.position);
+        const distanceToCenter = vec3.length(lightToCenter);
+
+        const size = vec3.create();
+        vec3.sub(size, bounds.max, bounds.min);
+        const maxSize = Math.max(size[0], size[1], size[2]);
+
+        // Calculate near and far planes
+        const nearPlane = Math.max(0.1, distanceToCenter - maxSize);
+        const farPlane = distanceToCenter + maxSize;
+
+        // Convert spotAngle from degrees to radians and double it for full cone angle
+        const fovY = (light.spotAngle * 2) * Math.PI / 180;
+        
+        // Create perspective projection
+        mat4.perspective(
+            this.matrixPool.projection,
+            fovY,
+            1.0, // Using 1.0 for aspect ratio since shadow maps are typically square
+            nearPlane,
+            farPlane
+        );
+
+        return { view: this.matrixPool.view, projection: this.matrixPool.projection };
+    }
+
+    /**
      * Updates the shadow map data for a light, creating resources if needed.
      * Should be called when light properties change or scene bounds are updated.
      * For directional lights, updates the view-projection matrix based on current bounds.
@@ -384,6 +460,18 @@ export class ShadowMapManager {
         
         if (light.type === LightType.DIRECTIONAL && vec3.len(light.direction) === 0) {
             return;
+        }
+
+        if (light.type === LightType.SPOT) {
+            // Validate spotlight parameters
+            if (vec3.len(light.direction) === 0) {
+                console.warn('Spotlight direction cannot be zero vector');
+                return;
+            }
+            if (light.spotAngle <= 0 || light.spotAngle >= 90) {
+                console.warn('Spotlight angle must be between 0 and 90 degrees');
+                return;
+            }
         }
         
         // Get or create shadow map resources
@@ -404,9 +492,12 @@ export class ShadowMapManager {
             const matrices = this.calculateDirectionalLightMatrix(light, bounds);
             shadowData.view = matrices.view;
             shadowData.projection = matrices.projection;
+        } else if (light.type === LightType.SPOT) {
+            const matrices = this.calculateSpotLightMatrix(light, bounds);
+            shadowData.view = matrices.view;
+            shadowData.projection = matrices.projection;
         }
         // Future light types will be handled here
-        // else if (light.type === 'spot') { ... }
         // else if (light.type === 'point') { ... }
     }
 
@@ -474,6 +565,7 @@ export class ShadowMapManager {
         const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
         const currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
         const currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+        const currentScissorTest = this.gl.getParameter(this.gl.SCISSOR_TEST);
 
         const currentClearColor = this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
         const currentClearDepth = this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE);
@@ -483,9 +575,12 @@ export class ShadowMapManager {
             this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, shadowData.framebuffer);
             this.gl.viewport(0, 0, this.resolution, this.resolution);
 
+            this.gl.disable(this.gl.SCISSOR_TEST);
+
             // Add before clearing
             this.gl.clearDepth(currentClearDepth);
             this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
+
 
             // Set up depth test state
             this.gl.enable(this.gl.DEPTH_TEST);
@@ -512,6 +607,12 @@ export class ShadowMapManager {
             this.gl.clearColor(currentClearColor[0], currentClearColor[1], 
                               currentClearColor[2], currentClearColor[3]);
             this.gl.clearDepth(currentClearDepth);
+
+            if (currentScissorTest) {
+                this.gl.enable(this.gl.SCISSOR_TEST);
+            } else {
+                this.gl.disable(this.gl.SCISSOR_TEST);
+            }
         }
     }
 
