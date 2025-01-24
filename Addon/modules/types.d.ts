@@ -207,7 +207,7 @@ export interface SpotLight extends LightBase {
     type: 'spot';
     position: [number, number, number];
     direction: [number, number, number];
-    spotAngle: number;
+    cosAngle: number;
     spotPenumbra: number;
     attenuation: number;
 }

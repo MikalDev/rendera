@@ -13163,6 +13163,20 @@ function scaleAndAdd(out, a, b, scale) {
   return out;
 }
 /**
+ * Calculates the euclidian distance between two vec3's
+ *
+ * @param {ReadonlyVec3} a the first operand
+ * @param {ReadonlyVec3} b the second operand
+ * @returns {Number} distance between a and b
+ */
+
+function distance(a, b) {
+  var x = b[0] - a[0];
+  var y = b[1] - a[1];
+  var z = b[2] - a[2];
+  return Math.hypot(x, y, z);
+}
+/**
  * Negates the components of a vec3
  *
  * @param {vec3} out the receiving vector
@@ -14434,8 +14448,6 @@ class GPUResourceManager {
             }
         }`;
         const fragmentShader = `#version 300 es
-        #extension GL_EXT_shader_texture_lod : enable
-        #extension GL_OES_standard_derivatives : enable
         precision highp float;
         precision highp sampler2DShadow;  // Match ShadowMapManager's precision
 
@@ -14448,7 +14460,7 @@ class GPUResourceManager {
             vec3 color;
             float intensity;
             float attenuation; // Used by point/spot
-            float spotAngle;   // Used by spot
+            float cosAngle;   // Used by spot
             float spotPenumbra;// Used by spot
         };
 
@@ -14560,8 +14572,8 @@ class GPUResourceManager {
                 
                 // Spot light cone calculation
                 float cosTheta = dot(L, normalize(-light.direction));
-                float cosCutoff = light.spotAngle;
-                float cosOuterCutoff = light.spotAngle * (1.0 - light.spotPenumbra);
+                float cosCutoff = light.cosAngle;
+                float cosOuterCutoff = light.cosAngle * (1.0 - light.spotPenumbra);
                 float epsilon = cosCutoff - cosOuterCutoff;
                 float spotIntensity = clamp((cosTheta - cosOuterCutoff) / epsilon, 0.0, 1.0);
                 
@@ -14623,6 +14635,9 @@ class GPUResourceManager {
             bias = clamp(bias, 0.0, 0.01);
             
             // Add bias to avoid shadow acne
+            if (light.type == 2) {
+                bias = 0.00001;
+            }
             float currentDepth = projCoords.z - bias;
             
             // PCF sampling for soft shadows
@@ -14638,25 +14653,6 @@ class GPUResourceManager {
                 }
             }
             shadow /= SAMPLES;
-
-            // For spotlights, check if fragment is within the light cone
-            if (light.type == 2) { // Spot light
-                vec3 lightToFrag = normalize(v_Position - light.position);
-                float cosAngle = dot(lightToFrag, normalize(light.direction));
-                float cosSpotOuter = cos(light.spotAngle * (1.0 - light.spotPenumbra));
-                
-                // If outside the outer cone, fully shadowed
-                if (cosAngle < cosSpotOuter) {
-                    return 0.0;
-                }
-                
-                // Smooth transition at cone edges
-                float cosSpotInner = cos(light.spotAngle);
-                if (cosAngle < cosSpotInner) {
-                    float spotFactor = smoothstep(cosSpotOuter, cosSpotInner, cosAngle);
-                    shadow *= spotFactor;
-                }
-            }
             
             return shadow;
         }
@@ -14693,11 +14689,10 @@ class GPUResourceManager {
             color = color / (color + vec3(1.0)); // Simple Reinhard tone mapping
             color = pow(color, vec3(1.0/2.2));   // Gamma correction
             
+            // Debug: Show shadow map
+            // fragColor = vec4(vec3(shadow), 1.0);
+
             fragColor = vec4(color, baseColorSample.a);
-            // fragColor = vec4(baseColorSample.rgb * NdotL, baseColorSample.a);
-            // Debug: Output normal as color
-            // fragColor = vec4(N * 0.5 + 0.5, 1.0);
-            // fragColor = vec4(vec3(NdotL), baseColorSample.a);
         }`;
         return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
     }
@@ -14751,8 +14746,8 @@ class GPUResourceManager {
             if ('attenuation' in light) {
                 this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.attenuation`), light.attenuation);
             }
-            if ('spotAngle' in light) {
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotAngle`), light.spotAngle);
+            if ('cosAngle' in light) {
+                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.cosAngle`), light.cosAngle);
                 this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotPenumbra`), light.spotPenumbra);
             }
         }
@@ -14803,11 +14798,11 @@ class GPUResourceManager {
     setSpotLightParams(index, angle, penumbra) {
         if (index >= this.MAX_LIGHTS || this.lights[index].type !== 'spot')
             return;
-        this.lights[index].spotAngle = angle;
+        this.lights[index].cosAngle = angle;
         this.lights[index].spotPenumbra = penumbra;
         this.dirtyLightParams = true;
     }
-    setShadowMapUniforms(shader, enabled, shadowMap = null, lightViewProjection = null, bias = 0.005) {
+    setShadowMapUniforms(shader, enabled, shadowMap = null, lightViewProjection = null, bias = 0.001) {
         this.gl.useProgram(shader);
         const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
         if (useShadowMapLoc) {
@@ -15603,43 +15598,40 @@ class ShadowMapManager {
         identity(this.matrixPool.view);
         identity(this.matrixPool.projection);
         this.validateBounds(bounds);
-        // Normalize the light direction
-        const normalizedDir = create$2();
-        normalize$2(normalizedDir, light.direction);
-        // Calculate view matrix from light's position and direction
-        const target = create$2();
-        scaleAndAdd(target, light.position, normalizedDir, 1.0);
-        // Calculate up vector ensuring it's perpendicular to light direction
-        const up = create$2();
-        if (Math.abs(normalizedDir[1]) > 0.99) {
-            set(up, 1, 0, 0); // Use X axis if light is pointing along Y
-        }
-        else {
-            set(up, 0, 1, 0); // Default to Y up
-            const right = create$2();
-            cross(right, normalizedDir, up);
-            normalize$2(right, right);
-            cross(up, right, normalizedDir);
-            normalize$2(up, up);
-        }
-        lookAt(this.matrixPool.view, light.position, target, up);
-        // Calculate the distance to the bounds for near/far planes
+        // Calculate scene center for reference
         const center = create$2();
         add(center, bounds.max, bounds.min);
         scale(center, center, 0.5);
-        const lightToCenter = create$2();
-        sub(lightToCenter, center, light.position);
-        const distanceToCenter = length(lightToCenter);
         const size = create$2();
         sub(size, bounds.max, bounds.min);
-        const maxSize = Math.max(size[0], size[1], size[2]);
-        // Calculate near and far planes
-        const nearPlane = Math.max(0.1, distanceToCenter - maxSize);
-        const farPlane = distanceToCenter + maxSize;
-        // Convert spotAngle from degrees to radians and double it for full cone angle
-        const fovY = (light.spotAngle * 2) * Math.PI / 180;
+        Math.max(size[0], size[1], size[2]);
+        // Normalize the light direction
+        const normalizedDir = create$2();
+        normalize$2(normalizedDir, light.direction);
+        // Calculate target point using light direction
+        const target = create$2();
+        scaleAndAdd(target, light.position, normalizedDir, 1.0); // Look one unit ahead
+        // Calculate up vector ensuring it's perpendicular to light direction
+        const up = fromValues(0, 1, 0); // Default up vector
+        const right = create$2();
+        cross(right, normalizedDir, up);
+        // If light direction is too close to up vector, use a different up vector
+        if (length(right) < 0.001) {
+            set(up, 0, 0, 1);
+            cross(right, normalizedDir, up);
+        }
+        normalize$2(right, right);
+        cross(up, right, normalizedDir);
+        normalize$2(up, up);
+        // Create view matrix looking from light position along light direction
+        lookAt(this.matrixPool.view, light.position, target, up);
+        // Use fixed near/far planes relative to light position
+        const nearPlane = 0.1;
+        const farPlane = distance(light.position, bounds.min) * 2;
+        // Convert cosAngle to radians for perspective matrix
+        const angleInRadians = Math.acos(light.cosAngle) * 2; // Double for full cone angle
         // Create perspective projection
-        perspective(this.matrixPool.projection, fovY, 1.0, // Using 1.0 for aspect ratio since shadow maps are typically square
+        perspective(this.matrixPool.projection, angleInRadians, 1.0, // Keep square for shadow map
         nearPlane, farPlane);
         return { view: this.matrixPool.view, projection: this.matrixPool.projection };
     }
@@ -15664,7 +15656,7 @@ class ShadowMapManager {
                 console.warn('Spotlight direction cannot be zero vector');
                 return;
             }
-            if (light.spotAngle <= 0 || light.spotAngle >= 90) {
+            if (light.cosAngle <= 0 || light.cosAngle >= 90) {
                 console.warn('Spotlight angle must be between 0 and 90 degrees');
                 return;
             }
@@ -16037,6 +16029,7 @@ class InstanceManager {
         this.gpuResources = gpuResources;
         this.instances = new Map();
         this.instancesByModel = new Map();
+        this.debugShadowMap = false;
         // GPU instance data
         this.instanceBuffers = new Map();
         this.nextInstanceId = 1;
@@ -16046,7 +16039,7 @@ class InstanceManager {
         this._animationController = new AnimationController(modelLoader);
         this.defaultShaderProgram = this.gpuResources.getDefaultShader();
         this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
-        this.shadowMapManager.initialize(1024);
+        this.shadowMapManager.initialize(2048);
         this.shadowMapShader = this.gpuResources.getShadowMapShader();
     }
     initialize() {
@@ -16180,7 +16173,9 @@ class InstanceManager {
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
-        if (this.shadowMapManager) ;
+        if (this.shadowMapManager && this.debugShadowMap) {
+            this.shadowMapManager.renderShadowMapDebug(0);
+        }
         this.gpuResources.gpuResourceCache.restoreModelMode();
         if (runtime)
             renderer.SetTexture(null);
@@ -16450,6 +16445,9 @@ class InstanceManager {
             instanceData.renderOptions.useNormalMap = enabled;
             this.dirtyInstances.add(instance.instanceId.id);
         }
+    }
+    setDebugShadowMap(enabled) {
+        this.debugShadowMap = enabled;
     }
     get animationController() {
         return this._animationController;

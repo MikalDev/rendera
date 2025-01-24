@@ -12,6 +12,7 @@ export declare class InstanceManager implements IInstanceManager {
     private defaultShaderProgram;
     private shadowMapShader;
     private shadowMapManager;
+    debugShadowMap: boolean;
     private instanceBuffers;
     private nextInstanceId;
     private dirtyInstances;
@@ -55,6 +56,7 @@ export declare class InstanceManager implements IInstanceManager {
     private startAnimation;
     private cleanupInstance;
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
+    setDebugShadowMap(enabled: boolean): void;
     get animationController(): AnimationController;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map

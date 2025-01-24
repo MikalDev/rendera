@@ -242,8 +242,6 @@ export class GPUResourceManager implements IGPUResourceManager {
         }`;
 
         const fragmentShader = `#version 300 es
-        #extension GL_EXT_shader_texture_lod : enable
-        #extension GL_OES_standard_derivatives : enable
         precision highp float;
         precision highp sampler2DShadow;  // Match ShadowMapManager's precision
 
@@ -256,7 +254,7 @@ export class GPUResourceManager implements IGPUResourceManager {
             vec3 color;
             float intensity;
             float attenuation; // Used by point/spot
-            float spotAngle;   // Used by spot
+            float cosAngle;   // Used by spot
             float spotPenumbra;// Used by spot
         };
 
@@ -368,8 +366,8 @@ export class GPUResourceManager implements IGPUResourceManager {
                 
                 // Spot light cone calculation
                 float cosTheta = dot(L, normalize(-light.direction));
-                float cosCutoff = light.spotAngle;
-                float cosOuterCutoff = light.spotAngle * (1.0 - light.spotPenumbra);
+                float cosCutoff = light.cosAngle;
+                float cosOuterCutoff = light.cosAngle * (1.0 - light.spotPenumbra);
                 float epsilon = cosCutoff - cosOuterCutoff;
                 float spotIntensity = clamp((cosTheta - cosOuterCutoff) / epsilon, 0.0, 1.0);
                 
@@ -431,6 +429,9 @@ export class GPUResourceManager implements IGPUResourceManager {
             bias = clamp(bias, 0.0, 0.01);
             
             // Add bias to avoid shadow acne
+            if (light.type == 2) {
+                bias = 0.00001;
+            }
             float currentDepth = projCoords.z - bias;
             
             // PCF sampling for soft shadows
@@ -446,25 +447,6 @@ export class GPUResourceManager implements IGPUResourceManager {
                 }
             }
             shadow /= SAMPLES;
-
-            // For spotlights, check if fragment is within the light cone
-            if (light.type == 2) { // Spot light
-                vec3 lightToFrag = normalize(v_Position - light.position);
-                float cosAngle = dot(lightToFrag, normalize(light.direction));
-                float cosSpotOuter = cos(light.spotAngle * (1.0 - light.spotPenumbra));
-                
-                // If outside the outer cone, fully shadowed
-                if (cosAngle < cosSpotOuter) {
-                    return 0.0;
-                }
-                
-                // Smooth transition at cone edges
-                float cosSpotInner = cos(light.spotAngle);
-                if (cosAngle < cosSpotInner) {
-                    float spotFactor = smoothstep(cosSpotOuter, cosSpotInner, cosAngle);
-                    shadow *= spotFactor;
-                }
-            }
             
             return shadow;
         }
@@ -501,11 +483,10 @@ export class GPUResourceManager implements IGPUResourceManager {
             color = color / (color + vec3(1.0)); // Simple Reinhard tone mapping
             color = pow(color, vec3(1.0/2.2));   // Gamma correction
             
+            // Debug: Show shadow map
+            // fragColor = vec4(vec3(shadow), 1.0);
+
             fragColor = vec4(color, baseColorSample.a);
-            // fragColor = vec4(baseColorSample.rgb * NdotL, baseColorSample.a);
-            // Debug: Output normal as color
-            // fragColor = vec4(N * 0.5 + 0.5, 1.0);
-            // fragColor = vec4(vec3(NdotL), baseColorSample.a);
         }`;
 
         return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
@@ -567,8 +548,8 @@ export class GPUResourceManager implements IGPUResourceManager {
             if ('attenuation' in light) {
                 this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.attenuation`), light.attenuation);
             }
-            if ('spotAngle' in light) {
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotAngle`), light.spotAngle);
+            if ('cosAngle' in light) {
+                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.cosAngle`), light.cosAngle);
                 this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotPenumbra`), light.spotPenumbra);
             }
         }
@@ -624,7 +605,7 @@ export class GPUResourceManager implements IGPUResourceManager {
     setSpotLightParams(index: number, angle: number, penumbra: number): void {
         if (index >= this.MAX_LIGHTS || this.lights[index].type !== 'spot') return;
         
-        this.lights[index].spotAngle = angle;
+        this.lights[index].cosAngle = angle;
         this.lights[index].spotPenumbra = penumbra;
         this.dirtyLightParams = true;
     }
@@ -634,7 +615,7 @@ export class GPUResourceManager implements IGPUResourceManager {
         enabled: boolean, 
         shadowMap: WebGLTexture | null = null,
         lightViewProjection: mat4 | null = null,
-        bias: number = 0.005
+        bias: number = 0.001
     ): void {
         this.gl.useProgram(shader);
         

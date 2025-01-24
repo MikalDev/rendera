@@ -385,27 +385,39 @@ export class ShadowMapManager {
         mat4.identity(this.matrixPool.projection);
         this.validateBounds(bounds);
 
+        // Calculate scene center for reference
+        const center = vec3.create();
+        vec3.add(center, bounds.max, bounds.min);
+        vec3.scale(center, center, 0.5);
+        
+        const size = vec3.create();
+        vec3.sub(size, bounds.max, bounds.min);
+        const maxSize = Math.max(size[0], size[1], size[2]);
+
         // Normalize the light direction
         const normalizedDir = vec3.create();
         vec3.normalize(normalizedDir, light.direction);
 
-        // Calculate view matrix from light's position and direction
+        // Calculate target point using light direction
         const target = vec3.create();
-        vec3.scaleAndAdd(target, light.position, normalizedDir, 1.0);
-        
-        // Calculate up vector ensuring it's perpendicular to light direction
-        const up = vec3.create();
-        if (Math.abs(normalizedDir[1]) > 0.99) {
-            vec3.set(up, 1, 0, 0); // Use X axis if light is pointing along Y
-        } else {
-            vec3.set(up, 0, 1, 0); // Default to Y up
-            const right = vec3.create();
-            vec3.cross(right, normalizedDir, up);
-            vec3.normalize(right, right);
-            vec3.cross(up, right, normalizedDir);
-            vec3.normalize(up, up);
-        }
+        vec3.scaleAndAdd(target, light.position, normalizedDir, 1.0); // Look one unit ahead
 
+        // Calculate up vector ensuring it's perpendicular to light direction
+        const up = vec3.fromValues(0, 1, 0); // Default up vector
+        const right = vec3.create();
+        vec3.cross(right, normalizedDir, up);
+        
+        // If light direction is too close to up vector, use a different up vector
+        if (vec3.length(right) < 0.001) {
+            vec3.set(up, 0, 0, 1);
+            vec3.cross(right, normalizedDir, up);
+        }
+        
+        vec3.normalize(right, right);
+        vec3.cross(up, right, normalizedDir);
+        vec3.normalize(up, up);
+
+        // Create view matrix looking from light position along light direction
         mat4.lookAt(
             this.matrixPool.view,
             light.position,
@@ -413,31 +425,18 @@ export class ShadowMapManager {
             up
         );
 
-        // Calculate the distance to the bounds for near/far planes
-        const center = vec3.create();
-        vec3.add(center, bounds.max, bounds.min);
-        vec3.scale(center, center, 0.5);
+        // Use fixed near/far planes relative to light position
+        const nearPlane = 0.1;
+        const farPlane = vec3.distance(light.position, bounds.min) * 2;
 
-        const lightToCenter = vec3.create();
-        vec3.sub(lightToCenter, center, light.position);
-        const distanceToCenter = vec3.length(lightToCenter);
-
-        const size = vec3.create();
-        vec3.sub(size, bounds.max, bounds.min);
-        const maxSize = Math.max(size[0], size[1], size[2]);
-
-        // Calculate near and far planes
-        const nearPlane = Math.max(0.1, distanceToCenter - maxSize);
-        const farPlane = distanceToCenter + maxSize;
-
-        // Convert spotAngle from degrees to radians and double it for full cone angle
-        const fovY = (light.spotAngle * 2) * Math.PI / 180;
+        // Convert cosAngle to radians for perspective matrix
+        const angleInRadians = Math.acos(light.cosAngle) * 2; // Double for full cone angle
         
         // Create perspective projection
         mat4.perspective(
             this.matrixPool.projection,
-            fovY,
-            1.0, // Using 1.0 for aspect ratio since shadow maps are typically square
+            angleInRadians,
+            1.0, // Keep square for shadow map
             nearPlane,
             farPlane
         );
@@ -468,7 +467,7 @@ export class ShadowMapManager {
                 console.warn('Spotlight direction cannot be zero vector');
                 return;
             }
-            if (light.spotAngle <= 0 || light.spotAngle >= 90) {
+            if (light.cosAngle <= 0 || light.cosAngle >= 90) {
                 console.warn('Spotlight angle must be between 0 and 90 degrees');
                 return;
             }

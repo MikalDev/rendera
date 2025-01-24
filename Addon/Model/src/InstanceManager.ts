@@ -14,6 +14,7 @@ export class InstanceManager implements IInstanceManager {
     private defaultShaderProgram: WebGLProgram;
     private shadowMapShader: WebGLProgram;
     private shadowMapManager: ShadowMapManager;
+    public debugShadowMap: boolean = false;
     
     // GPU instance data
     private instanceBuffers: Map<string, {
@@ -37,7 +38,7 @@ export class InstanceManager implements IInstanceManager {
         this._animationController = new AnimationController(modelLoader);
         this.defaultShaderProgram = this.gpuResources.getDefaultShader();
         this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
-        this.shadowMapManager.initialize(1024);
+        this.shadowMapManager.initialize(2048);
         this.shadowMapShader = this.gpuResources.getShadowMapShader();
     }
 
@@ -214,9 +215,8 @@ export class InstanceManager implements IInstanceManager {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
 
-        if (this.shadowMapManager) {
-            // Render debug shadow maps
-            // this.shadowMapManager.renderShadowMapDebug(0);
+        if (this.shadowMapManager && this.debugShadowMap) {
+            this.shadowMapManager.renderShadowMapDebug(0);
         }
 
         this.gpuResources.gpuResourceCache.restoreModelMode();
@@ -556,6 +556,10 @@ export class InstanceManager implements IInstanceManager {
             instanceData.renderOptions.useNormalMap = enabled;
             this.dirtyInstances.add(instance.instanceId.id);
         }
+    }
+
+    public setDebugShadowMap(enabled: boolean): void {
+        this.debugShadowMap = enabled;
     }
 
     get animationController(): AnimationController {
