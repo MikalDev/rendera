@@ -106,9 +106,6 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 			console.info('[rendera] processPendingDocuments', count);
 		}
 		this._currentTick++;
-
-		// get list of all model instances
-		const models = this.instanceManager.updateAllInstances(0.016);
 	}
 
 	public getViewMatrix() {

@@ -12,7 +12,9 @@ export class InstanceManager implements IInstanceManager {
     private instances: Map<number, InstanceData> = new Map();
     public instancesByModel: Map<string, Set<number>> = new Map();
     private defaultShaderProgram: WebGLProgram;
+    private shadowMapShader: WebGLProgram;
     private shadowMapManager: ShadowMapManager;
+    public debugShadowMap: boolean = false;
     
     // GPU instance data
     private instanceBuffers: Map<string, {
@@ -35,8 +37,9 @@ export class InstanceManager implements IInstanceManager {
         this.modelLoader = modelLoader;
         this._animationController = new AnimationController(modelLoader);
         this.defaultShaderProgram = this.gpuResources.getDefaultShader();
-        this.shadowMapManager = new ShadowMapManager(gl);
-        this.shadowMapManager.initialize();
+        this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
+        this.shadowMapManager.initialize(2048);
+        this.shadowMapShader = this.gpuResources.getShadowMapShader();
     }
 
     initialize(): void {
@@ -195,18 +198,25 @@ export class InstanceManager implements IInstanceManager {
         this.gpuResources.gpuResourceCache.cacheModelMode();
 
         if (this.shadowMapManager) {
-            debugger;
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
             this.shadowMapManager.renderAllShadowMaps(this);
         }
+
+        // Set shadow map uniforms from shadowMapData lightId 0
+        const shadowMapData = this.shadowMapManager.getShadowData(0);
+        this.gpuResources.setShadowMapUniforms(
+            this.defaultShaderProgram,
+            shadowMapData !== null, // Enable only if we have shadow data
+            shadowMapData?.texture || null,
+            shadowMapData ? mat4.multiply(mat4.create(), shadowMapData.projection, shadowMapData.view) : null
+        );
 
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
 
-        if (this.shadowMapManager) {
-            // Render debug shadow maps
-            // this.shadowMapManager.renderShadowMapDebug(0);
+        if (this.shadowMapManager && this.debugShadowMap) {
+            this.shadowMapManager.renderShadowMapDebug(0);
         }
 
         this.gpuResources.gpuResourceCache.restoreModelMode();
@@ -420,6 +430,91 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
+    public renderShadowMapInstances(
+        modelId: string,
+        instanceGroup: Set<number>,
+        viewProjection: { view: mat4, projection: mat4 }
+    ): void {
+        const modelData = this.modelLoader.getModelData(modelId);
+        if (!modelData) return;
+
+        // Get shadow map shader
+        const shadowShader = this.shadowMapShader;
+        this.gl.useProgram(shadowShader);
+
+        // For each instance
+        for (const instanceId of instanceGroup) {
+            const instance = this.instances.get(instanceId);
+            if (!instance) continue;
+
+            // Update world matrix
+            this.updateWorldMatrix(instance);
+
+            // For each mesh in the model
+            for (const renderableNode of modelData.renderableNodes) {
+                const mesh = renderableNode.modelMesh;
+                for (const primitive of mesh.primitives) {
+                    // 1. Bind VAO
+                    this.gl.bindVertexArray(primitive.vao);
+
+                    // 2. Set minimal required uniforms for shadow mapping
+                    const viewProjLoc = this.gl.getUniformLocation(shadowShader, 'u_LightViewProjection');
+                    const modelMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_Model');
+                    const nodeMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_NodeMatrix');
+                    const nodeBonesMatricesLoc = this.gl.getUniformLocation(shadowShader, 'u_BoneMatrices');
+                    const useSkinningLoc = this.gl.getUniformLocation(shadowShader, 'u_UseSkinning');
+
+                    // Combine view and projection for efficiency
+                    const lightViewProj = mat4.multiply(mat4.create(), viewProjection.projection, viewProjection.view);
+                    this.gl.uniformMatrix4fv(viewProjLoc, false, lightViewProj);
+                    this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
+
+                    // Handle animation matrices if present
+                    const animationState = instance.animationState;
+                    const animationMatrices = animationState.animationMatrices;
+                    const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    
+                    if (nodeMatrixLoc) {
+                        if (animationMatrix) {
+                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix);
+                        } else {
+                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, mat4.create());
+                        }
+                    }
+
+                    // Handle skinning
+                    let noBoneMatrices = true;
+                    if (nodeBonesMatricesLoc) {
+                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                        if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                            this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
+                            noBoneMatrices = false;
+                        }
+                    }
+                    if (useSkinningLoc) {
+                        this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
+                    }
+
+                    // Draw
+                    if (primitive.indexBuffer) {
+                        this.gl.drawElements(
+                            this.gl.TRIANGLES,
+                            primitive.indexCount,
+                            primitive.indexType,
+                            0
+                        );
+                    } else {
+                        this.gl.drawArrays(
+                            this.gl.TRIANGLES,
+                            0,
+                            primitive.vertexCount
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     private startAnimation(
         instance: InstanceData,
         animationName: string,
@@ -461,6 +556,10 @@ export class InstanceManager implements IInstanceManager {
             instanceData.renderOptions.useNormalMap = enabled;
             this.dirtyInstances.add(instance.instanceId.id);
         }
+    }
+
+    public setDebugShadowMap(enabled: boolean): void {
+        this.debugShadowMap = enabled;
     }
 
     get animationController(): AnimationController {

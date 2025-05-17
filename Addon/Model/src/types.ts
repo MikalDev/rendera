@@ -153,6 +153,11 @@ export interface IInstanceManager {
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
     updateModelAnimation(instance: Model, deltaTime: number): void;
     setModelBindPose(instance: Model): void;
+    renderShadowMapInstances(
+        modelId: string,
+        instanceGroup: Set<number>,
+        viewProjection: { view: mat4, projection: mat4 }
+    ): void;
 }
 
 export interface IModel {
@@ -229,6 +234,15 @@ export interface IGPUResourceManager {
     setLightIntensity(index: number, intensity: number): void;
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
     bindShaderAndMaterial(shader: WebGLProgram, materialIndex: number, modelData: ModelData): void;
+    setShadowMapUniforms(
+        shader: WebGLProgram, 
+        enabled: boolean, 
+        shadowMap: WebGLTexture | null,
+        lightViewProjection: mat4 | null,
+        bias?: number
+    ): void;
+    getShadowMapShader(): WebGLProgram;
+    updateCameraPosition(position: [number, number, number]): void;
     gpuResourceCache: IGPUResourceCache;
     lights: Light[];
 }
@@ -259,7 +273,7 @@ export interface SpotLight extends LightBase {
     type: 'spot';
     position: [number, number, number];
     direction: [number, number, number];
-    spotAngle: number;
+    cosAngle: number;
     spotPenumbra: number;
     attenuation: number;
 }

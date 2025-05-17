@@ -41,7 +41,13 @@ export class MaterialSystem {
     }
 
     private applyMaterial(material: MaterialData, shader: WebGLProgram): void {
-        // Bind textures to their fixed texture units based on sampler names
+        // First, unbind all possible texture units that might be used
+        for (const unit of Object.values(this.samplerTextureUnitMap)) {
+            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+        }
+
+        // Then bind textures to their fixed texture units based on sampler names
         material.textures.forEach((texture, samplerName) => {
             const textureUnit = this.samplerTextureUnitMap[samplerName];
             if (textureUnit === undefined) {
@@ -50,15 +56,22 @@ export class MaterialSystem {
             }
 
             const location = this.gl.getUniformLocation(shader, samplerName);
-            if (location === null) {
-                console.warn(`Uniform sampler '${samplerName}' not found in shader.`);
-                return;
+            const useTextureLoc = this.gl.getUniformLocation(shader, `u_Use${samplerName.slice(2)}`);
+            
+            if (texture && location !== null) {
+                // Texture exists, bind it and enable its use
+                this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
+                this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+                this.gl.uniform1i(location, textureUnit);
+                if (useTextureLoc !== null) {
+                    this.gl.uniform1i(useTextureLoc, 1);
+                }
+            } else {
+                // No texture, disable its use
+                if (useTextureLoc !== null) {
+                    this.gl.uniform1i(useTextureLoc, 0);
+                }
             }
-
-            this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-            this.gl.uniform1i(location, textureUnit);
-            // console.log(`Binding texture to unit ${textureUnit} for sampler '${samplerName}'`);
         });
 
         // Set material uniforms

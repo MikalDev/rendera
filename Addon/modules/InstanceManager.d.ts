@@ -10,7 +10,9 @@ export declare class InstanceManager implements IInstanceManager {
     private instances;
     instancesByModel: Map<string, Set<number>>;
     private defaultShaderProgram;
+    private shadowMapShader;
     private shadowMapManager;
+    debugShadowMap: boolean;
     private instanceBuffers;
     private nextInstanceId;
     private dirtyInstances;
@@ -47,9 +49,14 @@ export declare class InstanceManager implements IInstanceManager {
         view: mat4;
         projection: mat4;
     }): void;
+    renderShadowMapInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
+        view: mat4;
+        projection: mat4;
+    }): void;
     private startAnimation;
     private cleanupInstance;
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
+    setDebugShadowMap(enabled: boolean): void;
     get animationController(): AnimationController;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map

@@ -6,9 +6,24 @@
         canvas {
             border: 1px solid #000;
         }
+        #debugButton {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            padding: 8px 16px;
+            background-color: #444;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #debugButton:hover {
+            background-color: #666;
+        }
     </style>
 </head>
 <body>
+    <button id="debugButton">Toggle Shadow Debug</button>
     <canvas id="glCanvas" width="800" height="600"></canvas>
     <script type="module">
         // @ts-check
@@ -76,48 +91,51 @@
         const instance5 = instanceManager.createModel(model5.id);
         //const instance3 = instanceManager.createModel(model.id);
         instance.setRotation([ 0, 0.0, 0.0, 0 ]);
-        instance.setPosition(0, -100, 0);
+        instance.setPosition(0, -150, -50);
         instance.setScale(50, 50, 50);
 
         instance2.setRotation([0.0, 0.0, 0.0, 1.0]);
-        instance2.setPosition(50, -100, 0);
+        instance2.setPosition(0, 60, -100);
         instance2.setScale(30, 30, 30);
 
         instance3.setRotation([0.0, 0.0, 0.0, 1.0]);
-        instance3.setPosition(-100, 0, 0);
-        instance3.setScale(50, 50, 50);
+        instance3.setPosition(0, 0, -400);
+        instance3.setScale(150, 150, 150);
 
-        instance4.setRotation([0.0, 0.0, 0.0, 1.0]);
-        instance4.setPosition(100, -100, 0);
+        instance4.setRotation([0.707, 0.0, 0.0, 0.707]);
+        instance4.setPosition(150, 0, -150);
         instance4.setScale(100, 100, 100);
 
         instance5.setRotation([0.707, 0.0, 0.0, 0.707]);
-        instance5.setPosition(0, 0, 0);
+        instance5.setPosition(-150, -100, -100);
         instance5.setScale(0.2, 0.2, 0.2);
 
         console.log('Instance set');
+        /*
         gpuResourceManager.updateLight(0, {
             type: 'directional',
             castShadows: true,
             enabled: true,
-            position: [400, 10, 2000],
+            position: [0, 0, 400],
             color: [1.0, 1.0, 1.0],
-            intensity: 2.0,
+            intensity: 4.0,
             attenuation: 0.0000001,
-            direction: [0, 0, -1]
+            direction: [0.5, 0.5, -1]
         });
-        /*
-        gpuResourceManager.updateLight(1, {
+        */
+        gpuResourceManager.updateLight(0, {
             type: 'spot',
+            castShadows: true,
             enabled: true,
-            position: [-100, 30, 400],
+            position: [-100, 0, 500],
             color: [1.0, 0, 0],
             intensity: 4.0,
             attenuation: 0.0000001,
-            direction: [0, 0, -1],
-            spotAngle: 0.99,
-            spotPenumbra: 0.00
+            direction: [0.1, 0, -1.0],
+            cosAngle: 0.98,
+            spotPenumbra: 0.0
         });
+        /*
         gpuResourceManager.updateLight(2, {
             type: 'spot',
             enabled: true,
@@ -126,7 +144,7 @@
             intensity: 4.0,
             attenuation: 0.0000001,
             direction: [0, 0, -1],
-            spotAngle: 0.99,
+            cosAngle: 0.99,
             spotPenumbra: 0.001
         });
         gpuResourceManager.updateLight(3, {
@@ -137,11 +155,11 @@
             intensity: 4.0,
             attenuation: 0.0000001,
             direction: [0, 0, -1],
-            spotAngle: 0.99,
+            cosAngle: 0.99,
             spotPenumbra: 0.001
         });
         */
-        gpuResourceManager.updateCameraPosition([20, 20, 300]);
+        gpuResourceManager.updateCameraPosition([0, 0, 300]);
     
         // Create view projection matrix
         // @ts-ignore
@@ -152,8 +170,9 @@
 
         let rotation = 0;
         let normalMapEnabled = false;
+        let debugShadowMapEnabled = false;
 
-        // Add event listener outside the render loop
+        // Add event listeners outside the render loop
         document.addEventListener('keydown', (event) => {
             if (event.key.toLowerCase() === 'n') {
                 normalMapEnabled = !normalMapEnabled;
@@ -168,6 +187,15 @@
             }
         });
 
+        // Add debug shadow map toggle button handler
+        const debugButton = document.getElementById('debugButton');
+        if (debugButton) {
+            debugButton.addEventListener('click', () => {
+                debugShadowMapEnabled = !debugShadowMapEnabled;
+                instanceManager.setDebugShadowMap(debugShadowMapEnabled);
+            });
+        }
+
         instance3.playAnimation('animation_AnimatedCube', {loop: true});
         instance.playAnimation('Walk', {loop: true});
         instance2.playAnimation('Spell1', {loop: true});
@@ -179,9 +207,9 @@
             // Clear color and depth buffers
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             // Animate the instance
-            instance.updateAnimation(0.0007);
-            instance2.updateAnimation(0.0008);
-            instance3.updateAnimation(0.0001);
+            instance.updateAnimation(0.001);
+            instance2.updateAnimation(0.001);
+            instance3.updateAnimation(0.001);
             instance5.updateAnimation(0.001);
             rotation += 0.01;
             /*

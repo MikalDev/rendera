@@ -1,4 +1,5 @@
 import { IGPUResourceManager, IGPUResourceCache, Light, ModelData } from './types';
+import { mat4 } from 'gl-matrix';
 export declare class GPUResourceManager implements IGPUResourceManager {
     private gl;
     private shaderSystem;
@@ -39,6 +40,8 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     setLightColor(index: number, color: [number, number, number]): void;
     setLightIntensity(index: number, intensity: number): void;
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
+    setShadowMapUniforms(shader: WebGLProgram, enabled: boolean, shadowMap?: WebGLTexture | null, lightViewProjection?: mat4 | null, bias?: number): void;
+    getShadowMapShader(): WebGLProgram;
 }
 export declare class ShaderSystem {
     private gl;

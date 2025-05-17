@@ -1,5 +1,5 @@
 import { mat4, vec3 } from 'gl-matrix';
-import type { Light } from './types';
+import type { Light, IGPUResourceManager } from './types';
 import type { InstanceManager } from './InstanceManager';
 export declare enum LightType {
     DIRECTIONAL = "directional",
@@ -55,12 +55,14 @@ interface SceneBounds {
  * Currently supports directional lights, with architecture ready for spot and point lights.
  */
 export declare class ShadowMapManager {
+    private gpuResourceManager;
     private gl;
     private shadowMaps;
-    private resolution;
     private filterMode;
     private format;
+    private resolution;
     private sceneBounds;
+    private shadowMapShader;
     /** Default scene bounds used when no specific bounds are set */
     private static readonly DEFAULT_BOUNDS;
     private readonly matrixPool;
@@ -68,10 +70,10 @@ export declare class ShadowMapManager {
      * Creates a new ShadowMapManager instance.
      * @param gl - The WebGL2 context to use for rendering
      */
-    constructor(gl: WebGL2RenderingContext);
+    constructor(gl: WebGL2RenderingContext, gpuResourceManager: IGPUResourceManager);
     /**
      * Initializes the shadow map manager with the specified settings.
-     * @param resolution - The resolution of the shadow maps in pixels (default: 1024)
+     * @param resolution - The resolution of the shadow maps in pixels
      * @param filterMode - The filtering mode to use for shadow sampling (default: LINEAR)
      * @param format - The format to use for shadow maps (default: DEPTH24_UINT)
      */
@@ -125,6 +127,16 @@ export declare class ShadowMapManager {
      * @private
      */
     private calculateDirectionalLightMatrix;
+    /**
+     * Calculates the view-projection matrix for a spot light.
+     * Creates a perspective projection based on the spot light's angle and position.
+     *
+     * @param light - The spot light to calculate the matrix for
+     * @param bounds - The scene bounds to encompass in the shadow map
+     * @returns The calculated view-projection matrix for shadow mapping
+     * @private
+     */
+    private calculateSpotLightMatrix;
     /**
      * Updates the shadow map data for a light, creating resources if needed.
      * Should be called when light properties change or scene bounds are updated.

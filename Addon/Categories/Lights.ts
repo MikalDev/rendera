@@ -4,7 +4,7 @@ import type { Instance } from '../Instance.ts';
 
 @Category('lightsId', 'Lights')
 export default class LightsCategory {
-    @Action('setPointLight', 'Set Point Light', 'Set point light at position {0},{1},{2}', 'Set point light...', {
+    @Action('setPointLight', 'Set Point Light', 'Set point light at position {0},{1},{2}', 'Set point light', {
         params: [
                 addParam('lightNumber', 'Light Number', { type: Param.Number, initialValue: 0 }),
                 addParam('x', 'X Position', { type: Param.Number }),
@@ -12,12 +12,15 @@ export default class LightsCategory {
                 addParam('z', 'Z Position', { type: Param.Number }),
                 addParam('color', 'Color', { type: Param.Number, initialValue: 0.0 }),
                 addParam('intensity', 'Intensity', { type: Param.Number, initialValue: 1.0 }),
-                addParam('attenuation', 'Attenuation', { type: Param.Number, initialValue: 0.0000001 })
+                addParam('attenuation', 'Attenuation', { type: Param.Number, initialValue: 0.0 })
         ]
     })
     setPointLight(this: Instance, lightNumber: number, x: number, y: number, z: number, color: number, intensity: number, attenuation: number) {
+        // @ts-ignore
         const r = C3.GetRValue(color);
+        // @ts-ignore
         const g = C3.GetGValue(color);
+        // @ts-ignore
         const b = C3.GetBValue(color);
         this.gpuResourceManager.updateLight(lightNumber, {
             type: 'point',
@@ -26,6 +29,45 @@ export default class LightsCategory {
             color: [r, g, b],  // Default to white light
             intensity: intensity,
             attenuation: attenuation
+        });
+    }
+    @Action('setSpotLight', 'Set Spot Light', 'Set spot light at position {0},{1},{2}', 'Set spot light', {
+        params: [
+            addParam('lightNumber', 'Light Number', { type: Param.Number, initialValue: 0 }),
+            addParam('x', 'X Position', { type: Param.Number }),
+            addParam('y', 'Y Position', { type: Param.Number }),
+            addParam('z', 'Z Position', { type: Param.Number }),
+            addParam('direction-x', 'Direction X', { type: Param.Number }),
+            addParam('direction-y', 'Direction Y', { type: Param.Number }),
+            addParam('direction-z', 'Direction Z', { type: Param.Number }),
+            addParam('angle', 'Cone angle (degrees)', { type: Param.Number, initialValue: 45.0 }),
+            addParam('penumbra', 'Penumbra', { type: Param.Number, initialValue: 0.0 }),
+            addParam('color', 'Color', { type: Param.Number, initialValue: 0.0 }),
+            addParam('intensity', 'Intensity', { type: Param.Number, initialValue: 1.0 }),
+            addParam('attenuation', 'Attenuation', { type: Param.Number, initialValue: 0.0 }),
+            addParam('castShadow', 'Cast Shadow', { type: Param.Boolean, initialValue: false })
+        ]
+    })
+    setSpotLight(this: Instance, lightNumber: number, x: number, y: number, z: number, directionX: number, 
+        directionY: number, directionZ: number, angle: number, spotPenumbra: number,
+        color: number, intensity: number, attenuation: number, castShadow: boolean) {
+        // @ts-ignore
+        const r = C3.GetRValue(color);
+        // @ts-ignore
+        const g = C3.GetGValue(color);
+        // @ts-ignore
+        const b = C3.GetBValue(color);
+        this.gpuResourceManager.updateLight(lightNumber, {
+            type: 'spot',
+            enabled: true,
+            position: [x, y, z],
+            direction: [directionX, directionY, directionZ],
+            cosAngle: Math.cos(angle*Math.PI/180),
+            spotPenumbra: spotPenumbra,
+            color: [r, g, b],
+            intensity: intensity,
+            attenuation: attenuation,
+            castShadow: castShadow
         });
     }
 

@@ -1,6 +1,7 @@
 import { ModelError, ModelErrorCode } from './errors';
 import { GPUResourceCache } from './GPUResourceCache';
 import { IGPUResourceManager, IGPUResourceCache, Light, ModelData } from './types';
+import { mat4 } from 'gl-matrix';
 
 export class GPUResourceManager implements IGPUResourceManager {
     private gl: WebGL2RenderingContext;
@@ -179,10 +180,14 @@ export class GPUResourceManager implements IGPUResourceManager {
         uniform mat3 u_NormalMatrix;
         uniform mat4 u_NodeMatrix;
         uniform bool u_UseSkinning;
+        uniform bool u_UseShadowMap;
+        uniform mat4 u_LightViewProjection;  // Light's view-projection matrix
+
         out vec2 v_UV;
         out vec3 v_Normal;
         out vec3 v_Position;
         out mat3 v_TBN;
+        out vec4 v_PositionFromLight;  // Add position from light's perspective
 
         void main() {
             v_UV = uv;
@@ -208,13 +213,11 @@ export class GPUResourceManager implements IGPUResourceManager {
                     skinnedTangent += weights[i] * (mat3(u_BoneMatrices[joint]) * tangent.xyz);
                 }
                 gl_Position = u_Projection * u_View * u_Model * skinVertex;
-                // gl_Position = u_Projection * u_View * u_NodeMatrix * skinVertex;
                 v_Position = (u_Model * skinVertex).xyz;
                 N = normalize(u_NormalMatrix * skinnedNormal);
                 T = normalize(u_NormalMatrix * skinnedTangent.xyz);
             } else {
                 gl_Position = u_Projection * u_View * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
-                // gl_Position = u_Projection * u_View * u_Model * vec4(nPosition, 1.0);
                 v_Position = (u_Model * u_NodeMatrix * vec4(nPosition, 1.0)).xyz;
                 N = normalize(u_NormalMatrix * normal);
                 T = normalize(u_NormalMatrix * tangent.xyz);
@@ -223,15 +226,24 @@ export class GPUResourceManager implements IGPUResourceManager {
             vec3 B = normalize(cross(N, T)) * handedness;
             
             v_Normal = N;
-            // Create TBN matrix for transforming from tangent space to world space
             v_TBN = mat3(T, B, N);
             
+            // Calculate position from light's perspective for shadow mapping
+            if (u_UseShadowMap) {
+                // Fix: Use consistent world position calculation for both skinned and non-skinned
+                vec4 worldPos;
+                if (u_UseSkinning) {
+                    worldPos = u_Model * skinVertex;
+                } else {
+                    worldPos = u_Model * u_NodeMatrix * vec4(position, 1.0);
+                }
+                v_PositionFromLight = u_LightViewProjection * worldPos;
+            }
         }`;
 
         const fragmentShader = `#version 300 es
-        #extension GL_EXT_shader_texture_lod : enable
-        #extension GL_OES_standard_derivatives : enable
         precision highp float;
+        precision highp sampler2DShadow;  // Match ShadowMapManager's precision
 
         // Light structure matching TypeScript definitions
         struct Light {
@@ -242,7 +254,7 @@ export class GPUResourceManager implements IGPUResourceManager {
             vec3 color;
             float intensity;
             float attenuation; // Used by point/spot
-            float spotAngle;   // Used by spot
+            float cosAngle;   // Used by spot
             float spotPenumbra;// Used by spot
         };
 
@@ -253,6 +265,7 @@ export class GPUResourceManager implements IGPUResourceManager {
         in vec3 v_Normal;
         in vec3 v_Position;
         in mat3 v_TBN;
+        in vec4 v_PositionFromLight;  // Add input from vertex shader
 
         uniform vec3 u_CameraPosition;
         uniform vec4 u_BaseColorFactor;
@@ -265,7 +278,10 @@ export class GPUResourceManager implements IGPUResourceManager {
         uniform sampler2D u_MetallicRoughnessSampler;
         uniform sampler2D u_OcclusionSampler;
         uniform sampler2D u_EmissiveSampler;
+        uniform sampler2DShadow u_ShadowMap;  // Must be sampler2DShadow type
         uniform bool u_UseNormalMap;
+        uniform bool u_UseShadowMap;
+        uniform float u_ShadowBias;  // Bias to prevent shadow acne
 
         layout(location = 0) out vec4 fragColor;
 
@@ -350,8 +366,8 @@ export class GPUResourceManager implements IGPUResourceManager {
                 
                 // Spot light cone calculation
                 float cosTheta = dot(L, normalize(-light.direction));
-                float cosCutoff = light.spotAngle;
-                float cosOuterCutoff = light.spotAngle * (1.0 - light.spotPenumbra);
+                float cosCutoff = light.cosAngle;
+                float cosOuterCutoff = light.cosAngle * (1.0 - light.spotPenumbra);
                 float epsilon = cosCutoff - cosOuterCutoff;
                 float spotIntensity = clamp((cosTheta - cosOuterCutoff) / epsilon, 0.0, 1.0);
                 
@@ -378,6 +394,63 @@ export class GPUResourceManager implements IGPUResourceManager {
             return (diffuse + specular) * light.color * light.intensity * NdotL * attenuation;
         }
 
+        float calculateShadow(vec4 fragPosLightSpace) {
+            if (!u_UseShadowMap) return 1.0;
+            
+            // Perform perspective divide
+            vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+            
+            // Transform to [0,1] range
+            projCoords = projCoords * 0.5 + 0.5;
+            
+            // Basic bounds check
+            if (projCoords.x < 0.0 || projCoords.x > 1.0 || 
+                projCoords.y < 0.0 || projCoords.y > 1.0 || 
+                projCoords.z > 1.0) {
+                return 1.0;
+            }
+
+            // Get the light for shadow calculations (assuming first light casts shadows)
+            Light light = u_Lights[0];
+            
+            // Calculate bias based on surface angle and light type
+            float bias = u_ShadowBias;
+            vec3 normal = getNormal();
+            vec3 lightDir;
+            
+            if (light.type == 1) { // Directional light
+                lightDir = normalize(-light.direction);
+            } else { // Point or spot light
+                lightDir = normalize(light.position - v_Position);
+            }
+            
+            float cosTheta = max(dot(normal, lightDir), 0.0);
+            bias *= tan(acos(cosTheta));
+            bias = clamp(bias, 0.0, 0.01);
+            
+            // Add bias to avoid shadow acne
+            if (light.type == 2) {
+                bias = 0.00001;
+            }
+            float currentDepth = projCoords.z - bias;
+            
+            // PCF sampling for soft shadows
+            float shadow = 0.0;
+            vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMap, 0));
+            const int SAMPLE_RADIUS = 2;
+            const float SAMPLES = float((SAMPLE_RADIUS * 2 + 1) * (SAMPLE_RADIUS * 2 + 1));
+            
+            for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
+                for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
+                    vec2 offset = vec2(float(x), float(y)) * texelSize;
+                    shadow += texture(u_ShadowMap, vec3(projCoords.xy + offset, currentDepth));
+                }
+            }
+            shadow /= SAMPLES;
+            
+            return shadow;
+        }
+
         void main() {
             vec3 N = getNormal();
             vec3 V = normalize(u_CameraPosition - v_Position);
@@ -394,11 +467,14 @@ export class GPUResourceManager implements IGPUResourceManager {
             
             // Calculate lighting
             vec3 color = vec3(0.0);
+            float shadow = calculateShadow(v_PositionFromLight);
+            
             for(int i = 0; i < MAX_LIGHTS; i++) {
-                color += calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
+                vec3 lightContrib = calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
+                color += lightContrib * shadow;
             }
             
-            // Add ambient and emissive
+            // Add ambient and emissive (unaffected by shadows)
             vec3 ambient = vec3(0.03) * baseColor * aoSample;
             vec3 emissive = SRGBtoLinear(emissiveSample.rgb);
             color += ambient + emissive;
@@ -407,11 +483,10 @@ export class GPUResourceManager implements IGPUResourceManager {
             color = color / (color + vec3(1.0)); // Simple Reinhard tone mapping
             color = pow(color, vec3(1.0/2.2));   // Gamma correction
             
+            // Debug: Show shadow map
+            // fragColor = vec4(vec3(shadow), 1.0);
+
             fragColor = vec4(color, baseColorSample.a);
-            // fragColor = vec4(baseColorSample.rgb * NdotL, baseColorSample.a);
-            // Debug: Output normal as color
-            // fragColor = vec4(N * 0.5 + 0.5, 1.0);
-            // fragColor = vec4(vec3(NdotL), baseColorSample.a);
         }`;
 
         return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
@@ -473,8 +548,8 @@ export class GPUResourceManager implements IGPUResourceManager {
             if ('attenuation' in light) {
                 this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.attenuation`), light.attenuation);
             }
-            if ('spotAngle' in light) {
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotAngle`), light.spotAngle);
+            if ('cosAngle' in light) {
+                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.cosAngle`), light.cosAngle);
                 this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotPenumbra`), light.spotPenumbra);
             }
         }
@@ -530,9 +605,88 @@ export class GPUResourceManager implements IGPUResourceManager {
     setSpotLightParams(index: number, angle: number, penumbra: number): void {
         if (index >= this.MAX_LIGHTS || this.lights[index].type !== 'spot') return;
         
-        this.lights[index].spotAngle = angle;
+        this.lights[index].cosAngle = angle;
         this.lights[index].spotPenumbra = penumbra;
         this.dirtyLightParams = true;
+    }
+
+    setShadowMapUniforms(
+        shader: WebGLProgram, 
+        enabled: boolean, 
+        shadowMap: WebGLTexture | null = null,
+        lightViewProjection: mat4 | null = null,
+        bias: number = 0.001
+    ): void {
+        this.gl.useProgram(shader);
+        
+        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        if (useShadowMapLoc) {
+            this.gl.uniform1i(useShadowMapLoc, enabled ? 1 : 0);
+        }
+
+        if (enabled && shadowMap && lightViewProjection) {
+            // Use texture unit 10 for shadow map
+            this.gl.activeTexture(this.gl.TEXTURE10);  // Changed from TEXTURE7
+            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
+            const shadowMapLoc = this.gl.getUniformLocation(shader, 'u_ShadowMap');
+            if (shadowMapLoc) {
+                this.gl.uniform1i(shadowMapLoc, 10);  // Tell shader to use texture unit 10
+            }
+
+            const lightVPLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjection');
+            if (lightVPLoc) {
+                this.gl.uniformMatrix4fv(lightVPLoc, false, lightViewProjection);
+            }
+
+            const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+            if (biasLoc) {
+                this.gl.uniform1f(biasLoc, bias);
+            }
+        }
+    }
+
+    getShadowMapShader(): WebGLProgram {
+        const vertexShader = `#version 300 es
+        precision highp float;
+        precision highp int;
+        
+        layout(location = 0) in vec3 position;
+        layout(location = 3) in uvec4 joints;
+        layout(location = 4) in vec4 weights;
+
+        const int MAX_BONES = 64;
+
+        uniform mat4 u_Model;
+        uniform mat4 u_NodeMatrix;
+        uniform mat4 u_LightViewProjection;
+        uniform bool u_UseSkinning;
+        uniform mat4 u_BoneMatrices[MAX_BONES];
+
+        void main() {
+            // Set position to the vertex position
+            vec3 nPosition = position;
+            
+            if (u_UseSkinning) {
+                vec4 skinVertex = vec4(0.0);
+                for (int i = 0; i < 4; i++) {
+                    uint joint = joints[i];
+                    skinVertex += weights[i] * (u_BoneMatrices[joint] * vec4(position, 1.0));
+                }
+                gl_Position = u_LightViewProjection * u_Model * skinVertex;
+            } else {
+                gl_Position = u_LightViewProjection * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
+            }
+        }`;
+
+        const fragmentShader = `#version 300 es
+        precision highp float;
+        
+        void main() {
+            // No color output needed for shadow map
+            // The depth is automatically written
+        }`;
+
+        return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
     }
 }
 
