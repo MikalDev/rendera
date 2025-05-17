@@ -460,18 +460,6 @@ export class ShadowMapManager {
         if (light.type === LightType.DIRECTIONAL && vec3.len(light.direction) === 0) {
             return;
         }
-
-        if (light.type === LightType.SPOT) {
-            // Validate spotlight parameters
-            if (vec3.len(light.direction) === 0) {
-                console.warn('Spotlight direction cannot be zero vector');
-                return;
-            }
-            if (light.cosAngle <= 0 || light.cosAngle >= 90) {
-                console.warn('Spotlight angle must be between 0 and 90 degrees');
-                return;
-            }
-        }
         
         // Get or create shadow map resources
         let shadowData = this.shadowMaps.get(lightId);
