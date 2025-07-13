@@ -12497,6 +12497,33 @@ function clone$1(a) {
   return out;
 }
 /**
+ * Copy the values from one mat4 to another
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {ReadonlyMat4} a the source matrix
+ * @returns {mat4} out
+ */
+
+function copy(out, a) {
+  out[0] = a[0];
+  out[1] = a[1];
+  out[2] = a[2];
+  out[3] = a[3];
+  out[4] = a[4];
+  out[5] = a[5];
+  out[6] = a[6];
+  out[7] = a[7];
+  out[8] = a[8];
+  out[9] = a[9];
+  out[10] = a[10];
+  out[11] = a[11];
+  out[12] = a[12];
+  out[13] = a[13];
+  out[14] = a[14];
+  out[15] = a[15];
+  return out;
+}
+/**
  * Create a new mat4 with the given values
  *
  * @param {Number} m00 Component in column 0, row 0 position (index 0)
@@ -14379,6 +14406,7 @@ class GPUResourceManager {
         layout(location = 5) in vec4 tangent;
 
         const int MAX_BONES = 64;
+        const int MAX_SHADOW_MAPS = 8;
 
         uniform mat4 u_Model;
         uniform mat4 u_View;
@@ -14388,13 +14416,14 @@ class GPUResourceManager {
         uniform mat4 u_NodeMatrix;
         uniform bool u_UseSkinning;
         uniform bool u_UseShadowMap;
-        uniform mat4 u_LightViewProjection;  // Light's view-projection matrix
+        uniform mat4 u_LightViewProjections[MAX_SHADOW_MAPS];  // Light view-projection matrices
+        uniform bool u_ShadowEnabled[MAX_SHADOW_MAPS];  // Which shadow maps are active
 
         out vec2 v_UV;
         out vec3 v_Normal;
         out vec3 v_Position;
         out mat3 v_TBN;
-        out vec4 v_PositionFromLight;  // Add position from light's perspective
+        out vec4 v_PositionsFromLight[MAX_SHADOW_MAPS];  // Positions from each light's perspective
 
         void main() {
             v_UV = uv;
@@ -14435,7 +14464,7 @@ class GPUResourceManager {
             v_Normal = N;
             v_TBN = mat3(T, B, N);
             
-            // Calculate position from light's perspective for shadow mapping
+            // Calculate positions from light perspectives for shadow mapping
             if (u_UseShadowMap) {
                 // Fix: Use consistent world position calculation for both skinned and non-skinned
                 vec4 worldPos;
@@ -14444,7 +14473,20 @@ class GPUResourceManager {
                 } else {
                     worldPos = u_Model * u_NodeMatrix * vec4(position, 1.0);
                 }
-                v_PositionFromLight = u_LightViewProjection * worldPos;
+                
+                // Calculate position from each shadow-casting light's perspective
+                for (int i = 0; i < MAX_SHADOW_MAPS; i++) {
+                    if (u_ShadowEnabled[i]) {
+                        v_PositionsFromLight[i] = u_LightViewProjections[i] * worldPos;
+                    } else {
+                        v_PositionsFromLight[i] = vec4(0.0); // Initialize unused positions
+                    }
+                }
+            } else {
+                // Initialize all positions to zero when shadows are disabled
+                for (int i = 0; i < MAX_SHADOW_MAPS; i++) {
+                    v_PositionsFromLight[i] = vec4(0.0);
+                }
             }
         }`;
         const fragmentShader = `#version 300 es
@@ -14465,13 +14507,14 @@ class GPUResourceManager {
         };
 
         const int MAX_LIGHTS = 8;
+        const int MAX_SHADOW_MAPS = 8;
         uniform Light u_Lights[MAX_LIGHTS];
 
         in vec2 v_UV;
         in vec3 v_Normal;
         in vec3 v_Position;
         in mat3 v_TBN;
-        in vec4 v_PositionFromLight;  // Add input from vertex shader
+        in vec4 v_PositionsFromLight[MAX_SHADOW_MAPS];  // Positions from each light's perspective
 
         uniform vec3 u_CameraPosition;
         uniform vec4 u_BaseColorFactor;
@@ -14484,9 +14527,11 @@ class GPUResourceManager {
         uniform sampler2D u_MetallicRoughnessSampler;
         uniform sampler2D u_OcclusionSampler;
         uniform sampler2D u_EmissiveSampler;
-        uniform sampler2DShadow u_ShadowMap;  // Must be sampler2DShadow type
+        uniform sampler2DShadow u_ShadowMaps[MAX_SHADOW_MAPS];  // Shadow map texture array
         uniform bool u_UseNormalMap;
         uniform bool u_UseShadowMap;
+        uniform bool u_ShadowEnabled[MAX_SHADOW_MAPS];  // Which shadow maps are active
+        uniform int u_LightToShadowMap[MAX_LIGHTS];  // Maps light index to shadow map index (-1 = no shadow)
         uniform float u_ShadowBias;  // Bias to prevent shadow acne
 
         layout(location = 0) out vec4 fragColor;
@@ -14600,8 +14645,8 @@ class GPUResourceManager {
             return (diffuse + specular) * light.color * light.intensity * NdotL * attenuation;
         }
 
-        float calculateShadow(vec4 fragPosLightSpace) {
-            if (!u_UseShadowMap) return 1.0;
+        float calculateShadowForMap(vec4 fragPosLightSpace, int shadowMapIndex, Light light) {
+            if (!u_UseShadowMap || !u_ShadowEnabled[shadowMapIndex]) return 1.0;
             
             // Perform perspective divide
             vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
@@ -14613,11 +14658,10 @@ class GPUResourceManager {
             if (projCoords.x < 0.0 || projCoords.x > 1.0 || 
                 projCoords.y < 0.0 || projCoords.y > 1.0 || 
                 projCoords.z > 1.0) {
+                // DEBUG: Show which shadow maps are out of bounds
+                // This will help us see if lights are covering the right areas
                 return 1.0;
             }
-
-            // Get the light for shadow calculations (assuming first light casts shadows)
-            Light light = u_Lights[0];
             
             // Calculate bias based on surface angle and light type
             float bias = u_ShadowBias;
@@ -14640,19 +14684,56 @@ class GPUResourceManager {
             }
             float currentDepth = projCoords.z - bias;
             
-            // PCF sampling for soft shadows
+            // Simplified shadow sampling - single sample per shadow map for debugging
             float shadow = 0.0;
-            vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMap, 0));
+            
+            // DEBUG: Color code based on which shadow map we're sampling
+            // This will help us see which shadow map is being used
+            if (shadowMapIndex == 0) {
+                shadow = texture(u_ShadowMaps[0], vec3(projCoords.xy, currentDepth));
+                // DEBUG: Tint red if using shadow map 0
+                //gl_FragColor.r += 0.1;
+            } else if (shadowMapIndex == 1) {
+                shadow = texture(u_ShadowMaps[1], vec3(projCoords.xy, currentDepth));
+                // DEBUG: Tint green if using shadow map 1
+                //gl_FragColor.g += 0.1;
+            } else if (shadowMapIndex == 2) {
+                shadow = texture(u_ShadowMaps[2], vec3(projCoords.xy, currentDepth));
+                // DEBUG: Tint blue if using shadow map 2
+                //gl_FragColor.b += 0.1;
+            } else if (shadowMapIndex == 3) {
+                shadow = texture(u_ShadowMaps[3], vec3(projCoords.xy, currentDepth));
+                // DEBUG: Tint yellow if using shadow map 3
+                //gl_FragColor.rg += vec2(0.1);
+            } else if (shadowMapIndex == 4) {
+                shadow = texture(u_ShadowMaps[4], vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 5) {
+                shadow = texture(u_ShadowMaps[5], vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 6) {
+                shadow = texture(u_ShadowMaps[6], vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 7) {
+                shadow = texture(u_ShadowMaps[7], vec3(projCoords.xy, currentDepth));
+            }
+            
+            // Old PCF code commented out for debugging
+            /*
             const int SAMPLE_RADIUS = 2;
             const float SAMPLES = float((SAMPLE_RADIUS * 2 + 1) * (SAMPLE_RADIUS * 2 + 1));
             
-            for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
-                for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
-                    vec2 offset = vec2(float(x), float(y)) * texelSize;
-                    shadow += texture(u_ShadowMap, vec3(projCoords.xy + offset, currentDepth));
+            if (shadowMapIndex == 0) {
+                vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMaps[0], 0));
+                for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
+                    for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
+                        vec2 offset = vec2(float(x), float(y)) * texelSize;
+                        shadow += texture(u_ShadowMaps[0], vec3(projCoords.xy + offset, currentDepth));
+                    }
                 }
-            }
-            shadow /= SAMPLES;
+            } else if (shadowMapIndex == 1) {
+                vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMaps[1], 0));
+                for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
+                    for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
+                        vec2 offset = vec2(float(x), float(y)) * texelSize;
+            */
             
             return shadow;
         }
@@ -14673,10 +14754,18 @@ class GPUResourceManager {
             
             // Calculate lighting
             vec3 color = vec3(0.0);
-            float shadow = calculateShadow(v_PositionFromLight);
             
             for(int i = 0; i < MAX_LIGHTS; i++) {
                 vec3 lightContrib = calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
+                
+                // Apply shadow for this light if it casts shadows
+                float shadow = 1.0; // Default to no shadow
+                int shadowMapIndex = u_LightToShadowMap[i];
+                if (shadowMapIndex >= 0 && shadowMapIndex < MAX_SHADOW_MAPS) {
+                    // Use the current light for shadow calculation (light i corresponds to shadowMapIndex)
+                    shadow = calculateShadowForMap(v_PositionsFromLight[shadowMapIndex], shadowMapIndex, u_Lights[i]);
+                }
+                
                 color += lightContrib * shadow;
             }
             
@@ -14711,6 +14800,10 @@ class GPUResourceManager {
             return;
         this.lights[index].enabled = enabled;
         this.dirtyLightStates.add(index);
+        // Validate shadow count if enabling a light that casts shadows
+        if (enabled && this.lights[index].castShadows) {
+            this.validateShadowCount();
+        }
     }
     updateLightUniforms(shader) {
         if (this.dirtyLightParams) {
@@ -14802,6 +14895,26 @@ class GPUResourceManager {
         this.lights[index].spotPenumbra = penumbra;
         this.dirtyLightParams = true;
     }
+    setLightCastShadows(index, castShadows) {
+        if (index >= this.MAX_LIGHTS)
+            return;
+        if (GPUResourceManager.DEBUG_SHADOWS) {
+            console.log(`[GPUResourceManager] Setting light ${index} castShadows to ${castShadows} (type: ${this.lights[index].type}, enabled: ${this.lights[index].enabled})`);
+        }
+        this.lights[index].castShadows = castShadows;
+        this.dirtyLightParams = true; // Trigger light updates
+        // Validate shadow count and warn if exceeded
+        this.validateShadowCount();
+    }
+    validateShadowCount() {
+        const shadowCastingLights = this.lights.filter(light => light.enabled && light.castShadows);
+        if (shadowCastingLights.length > 8) {
+            console.warn(`Warning: ${shadowCastingLights.length} lights are configured to cast shadows, but maximum supported is 8. Some lights may not cast shadows.`);
+        }
+    }
+    /**
+     * @deprecated Use setMultipleShadowMapUniforms instead
+     */
     setShadowMapUniforms(shader, enabled, shadowMap = null, lightViewProjection = null, bias = 0.001) {
         this.gl.useProgram(shader);
         const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
@@ -14825,6 +14938,117 @@ class GPUResourceManager {
                 this.gl.uniform1f(biasLoc, bias);
             }
         }
+    }
+    /**
+     * Sets uniforms for multiple shadow maps using data from ShadowMapManager.
+     * This method replaces setShadowMapUniforms for the new multi-shadow architecture.
+     */
+    setMultipleShadowMapUniforms(shader, shadowMapManager, bias = 0.001) {
+        this.gl.useProgram(shader);
+        // Get active shadow map data
+        const activeShadowMapIndices = shadowMapManager.getActiveShadowMapIndices();
+        const lightToShadowMapping = shadowMapManager.getLightToShadowMapMapping();
+        if (GPUResourceManager.DEBUG_SHADOWS) {
+            console.log(`[GPUResourceManager] Setting up shadow uniforms - Active shadow maps: [${activeShadowMapIndices.join(', ')}], Light mappings:`, Array.from(lightToShadowMapping.entries()));
+        }
+        // Set global shadow map enabled flag
+        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        const shadowsEnabled = activeShadowMapIndices.length > 0;
+        if (useShadowMapLoc) {
+            this.gl.uniform1i(useShadowMapLoc, shadowsEnabled ? 1 : 0);
+        }
+        // Set shadow bias
+        const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+        if (biasLoc) {
+            this.gl.uniform1f(biasLoc, bias);
+        }
+        if (!shadowsEnabled) {
+            return; // No shadows to set up
+        }
+        // Initialize shadow enabled array (all false)
+        const shadowEnabledArray = new Array(8).fill(0); // MAX_SHADOW_MAPS = 8
+        const lightToShadowArray = new Array(8).fill(-1); // MAX_LIGHTS = 8, -1 = no shadow
+        const viewProjectionMatrices = new Array(8);
+        // Populate arrays with active shadow maps
+        for (const shadowMapIndex of activeShadowMapIndices) {
+            shadowEnabledArray[shadowMapIndex] = 1;
+            const shadowData = shadowMapManager.getShadowDataByIndex(shadowMapIndex);
+            if (shadowData) {
+                // Bind shadow map texture
+                const textureUnit = this.gl.TEXTURE10 + shadowMapIndex;
+                this.gl.activeTexture(textureUnit);
+                this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
+                if (GPUResourceManager.DEBUG_SHADOWS) {
+                    const lightId = shadowMapManager.getShadowMapLightId(shadowMapIndex);
+                    const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+                    console.log(`[GPUResourceManager] Binding texture ${shadowData.texture} to unit ${10 + shadowMapIndex} for shadow map ${shadowMapIndex} (light ${lightId}), current bound: ${currentTexture}`);
+                }
+                // Calculate combined view-projection matrix
+                const viewProjection = new Float32Array(16);
+                const combined = create$3();
+                multiply(combined, shadowData.projection, shadowData.view);
+                copy(viewProjection, combined);
+                viewProjectionMatrices[shadowMapIndex] = viewProjection;
+                if (GPUResourceManager.DEBUG_SHADOWS) {
+                    const lightId = shadowMapManager.getShadowMapLightId(shadowMapIndex);
+                    // Log first few elements of the matrix to see if they're different
+                    const sample = `[${combined[0].toFixed(2)}, ${combined[1].toFixed(2)}, ${combined[12].toFixed(2)}, ${combined[13].toFixed(2)}]`;
+                    console.log(`[GPUResourceManager] Shadow map ${shadowMapIndex} -> Light ${lightId}, VP matrix set, sample: ${sample}`);
+                }
+            }
+        }
+        // Set light-to-shadow mapping
+        for (const [lightId, shadowMapIndex] of lightToShadowMapping) {
+            if (lightId < 8) { // MAX_LIGHTS = 8
+                lightToShadowArray[lightId] = shadowMapIndex;
+                if (GPUResourceManager.DEBUG_SHADOWS) {
+                    console.log(`[GPUResourceManager] Light ${lightId} -> Shadow map ${shadowMapIndex} mapping set`);
+                }
+            }
+        }
+        // Set uniform arrays
+        const shadowEnabledLoc = this.gl.getUniformLocation(shader, 'u_ShadowEnabled');
+        if (shadowEnabledLoc) {
+            this.gl.uniform1iv(shadowEnabledLoc, shadowEnabledArray);
+        }
+        const lightToShadowMapLoc = this.gl.getUniformLocation(shader, 'u_LightToShadowMap');
+        if (lightToShadowMapLoc) {
+            this.gl.uniform1iv(lightToShadowMapLoc, lightToShadowArray);
+        }
+        // Set shadow map texture array
+        const shadowMapArrayLoc = this.gl.getUniformLocation(shader, 'u_ShadowMaps');
+        if (shadowMapArrayLoc) {
+            const textureUnits = new Array(8);
+            for (let i = 0; i < 8; i++) {
+                textureUnits[i] = 10 + i; // Texture units 10-17
+            }
+            this.gl.uniform1iv(shadowMapArrayLoc, textureUnits);
+        }
+        // Set light view-projection matrices array
+        const lightViewProjectionsLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjections');
+        if (lightViewProjectionsLoc) {
+            // Create a flat array of all matrices (8 matrices * 16 floats each)
+            const allMatrices = new Float32Array(8 * 16);
+            for (let i = 0; i < 8; i++) {
+                if (viewProjectionMatrices[i]) {
+                    allMatrices.set(viewProjectionMatrices[i], i * 16);
+                }
+                else {
+                    // Set identity matrix for unused slots
+                    const identity = create$3();
+                    allMatrices.set(identity, i * 16);
+                }
+            }
+            this.gl.uniformMatrix4fv(lightViewProjectionsLoc, false, allMatrices);
+        }
+    }
+    /**
+     * Enable or disable debug logging for GPU resource operations.
+     * @param enabled - Whether to enable debug logging
+     */
+    static setDebugLogging(enabled) {
+        GPUResourceManager.DEBUG_SHADOWS = enabled;
+        console.log(`[GPUResourceManager] Debug logging ${enabled ? 'enabled' : 'disabled'}`);
     }
     getShadowMapShader() {
         const vertexShader = `#version 300 es
@@ -14868,6 +15092,8 @@ class GPUResourceManager {
         return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
     }
 }
+// Debug flag
+GPUResourceManager.DEBUG_SHADOWS = true; // Set to true to enable debug logging
 // ShaderSystem for managing shaders and programs
 class ShaderSystem {
     constructor(gl) {
@@ -15357,6 +15583,7 @@ class ShadowMapManager {
      */
     constructor(gl, gpuResourceManager) {
         this.resolution = 4096;
+        this.nextAvailableShadowMapIndex = 0;
         this.matrixPool = {
             view: create$3(),
             projection: create$3()
@@ -15370,6 +15597,11 @@ class ShadowMapManager {
         this.format = ShadowMapFormat.DEPTH24_UINT; // Default to 24-bit depth
         this.sceneBounds = ShadowMapManager.DEFAULT_BOUNDS;
         this.shadowMapShader = this.gpuResourceManager.getShadowMapShader();
+        // Initialize new tracking properties
+        this.lightToShadowMapIndex = new Map();
+        this.shadowMapIndexToLightId = new Map();
+        this.activeShadowMaps = new Set();
+        this.nextAvailableShadowMapIndex = 0;
         console.log('ShadowMapManager constructor');
     }
     /**
@@ -15486,6 +15718,12 @@ class ShadowMapManager {
             // Create resources
             const texture = this.createGLResource(() => this.gl.createTexture(), 'texture');
             const framebuffer = this.createGLResource(() => this.gl.createFramebuffer(), 'framebuffer');
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                // Create a unique identifier for this texture
+                const textureId = performance.now().toString(36).substr(2, 5);
+                texture.__debugId = textureId;
+                console.log(`[ShadowMapManager] Created texture ${textureId} (obj: ${texture}) and framebuffer ${framebuffer} for light ${light.type}`);
+            }
             // Setup texture
             this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
             // Configure format based on settings
@@ -15582,7 +15820,10 @@ class ShadowMapManager {
         lookAt(this.matrixPool.view, lightPos, center, up);
         // Create orthographic projection that encompasses the scene
         ortho(this.matrixPool.projection, -maxSize / 2, maxSize / 2, -maxSize / 2, maxSize / 2, 0.1, maxSize * 2);
-        return { view: this.matrixPool.view, projection: this.matrixPool.projection };
+        return {
+            view: clone$1(this.matrixPool.view),
+            projection: clone$1(this.matrixPool.projection)
+        };
     }
     /**
      * Calculates the view-projection matrix for a spot light.
@@ -15604,13 +15845,15 @@ class ShadowMapManager {
         scale(center, center, 0.5);
         const size = create$2();
         sub(size, bounds.max, bounds.min);
-        Math.max(size[0], size[1], size[2]);
+        const maxSize = Math.max(size[0], size[1], size[2]);
         // Normalize the light direction
         const normalizedDir = create$2();
         normalize$2(normalizedDir, light.direction);
-        // Calculate target point using light direction
+        // Calculate target point using light direction - look towards scene center for better coverage
         const target = create$2();
-        scaleAndAdd(target, light.position, normalizedDir, 1.0); // Look one unit ahead
+        const sceneDistance = distance(light.position, center);
+        const lookDistance = Math.max(sceneDistance, maxSize); // Look at least scene-distance or scene-size away
+        scaleAndAdd(target, light.position, normalizedDir, lookDistance);
         // Calculate up vector ensuring it's perpendicular to light direction
         const up = fromValues(0, 1, 0); // Default up vector
         const right = create$2();
@@ -15633,7 +15876,13 @@ class ShadowMapManager {
         // Create perspective projection
         perspective(this.matrixPool.projection, angleInRadians, 1.0, // Keep square for shadow map
         nearPlane, farPlane);
-        return { view: this.matrixPool.view, projection: this.matrixPool.projection };
+        if (ShadowMapManager.DEBUG_SHADOWS) {
+            console.log(`[ShadowMapManager] Spot light matrix calc - pos: [${light.position[0].toFixed(1)}, ${light.position[1].toFixed(1)}, ${light.position[2].toFixed(1)}], dir: [${light.direction[0].toFixed(2)}, ${light.direction[1].toFixed(2)}, ${light.direction[2].toFixed(2)}], target: [${target[0].toFixed(1)}, ${target[1].toFixed(1)}, ${target[2].toFixed(1)}], angle: ${(angleInRadians * 180 / Math.PI).toFixed(1)}°`);
+        }
+        return {
+            view: clone$1(this.matrixPool.view),
+            projection: clone$1(this.matrixPool.projection)
+        };
     }
     /**
      * Updates the shadow map data for a light, creating resources if needed.
@@ -15644,17 +15893,47 @@ class ShadowMapManager {
      * @param light - The light to update shadow map data for
      */
     updateShadowMap(lightId, light) {
-        if (!light.enabled || this.shadowMaps.size >= SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS) {
+        // Check if light should cast shadows
+        if (!light.enabled || !light.castShadows) {
+            // If light exists but shouldn't cast shadows, remove it
+            if (this.shadowMaps.has(lightId)) {
+                if (ShadowMapManager.DEBUG_SHADOWS) {
+                    console.log(`[ShadowMapManager] Removing shadow map for light ${lightId} (enabled: ${light.enabled}, castShadows: ${light.castShadows})`);
+                }
+                this.removeShadowMap(lightId);
+            }
             return;
         }
         if (light.type === LightType.DIRECTIONAL && len(light.direction) === 0) {
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                console.log(`[ShadowMapManager] Skipping light ${lightId}: directional light has zero-length direction`);
+            }
+            return;
+        }
+        // Assign shadow map index if needed
+        const shadowMapIndex = this.assignShadowMapIndex(lightId);
+        if (shadowMapIndex === -1) {
+            // Cannot assign shadow map (max limit reached)
             return;
         }
         // Get or create shadow map resources
         let shadowData = this.shadowMaps.get(lightId);
         if (!shadowData) {
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                console.log(`[ShadowMapManager] Creating new shadow map resources for light ${lightId} (type: ${light.type})`);
+            }
             shadowData = this.createShadowMapResources(light);
             this.shadowMaps.set(lightId, shadowData);
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                const textureId = shadowData.texture.__debugId || 'unknown';
+                console.log(`[ShadowMapManager] Stored shadow map for light ${lightId} with texture ID ${textureId}`);
+            }
+        }
+        else {
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                const textureId = shadowData.texture.__debugId || 'unknown';
+                console.log(`[ShadowMapManager] Reusing existing shadow map for light ${lightId} with texture ID ${textureId}`);
+            }
         }
         // Update light reference in case it changed
         shadowData.light = light;
@@ -15708,6 +15987,11 @@ class ShadowMapManager {
             this.cleanupGLResources(data);
         }
         this.shadowMaps.clear();
+        // Clear association tracking
+        this.lightToShadowMapIndex.clear();
+        this.shadowMapIndexToLightId.clear();
+        this.activeShadowMaps.clear();
+        this.nextAvailableShadowMapIndex = 0;
     }
     renderInstances(instanceManager, shadowData) {
         for (const [modelId, instanceGroup] of instanceManager.instancesByModel) {
@@ -15741,6 +16025,10 @@ class ShadowMapManager {
             // Set up shadow rendering state
             this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, shadowData.framebuffer);
             this.gl.viewport(0, 0, this.resolution, this.resolution);
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                const textureId = shadowData.texture.__debugId || 'unknown';
+                console.log(`[ShadowMapManager] Rendering shadow map for light ${lightId}, using texture ID ${textureId}, framebuffer ${shadowData.framebuffer}`);
+            }
             this.gl.disable(this.gl.SCISSOR_TEST);
             // Add before clearing
             this.gl.clearDepth(currentClearDepth);
@@ -15834,6 +16122,8 @@ class ShadowMapManager {
         if (shadowData) {
             this.cleanupGLResources(shadowData);
             this.shadowMaps.delete(lightId);
+            // Release the shadow map index association
+            this.releaseShadowMapIndex(lightId);
         }
     }
     cleanupGLResources(data) {
@@ -15857,14 +16147,13 @@ class ShadowMapManager {
     }
     /**
      * Updates all shadow maps using the provided array of lights.
-     * Iterates over the lights and updates the shadow map for each enabled light.
+     * Iterates over the lights and updates the shadow map for each enabled light that casts shadows.
      * @param lights - Array of lights to update shadow maps for
      */
     updateAllShadowMaps(lights) {
         lights.forEach((light, index) => {
-            if (light.enabled) {
-                this.updateShadowMap(index, light);
-            }
+            // updateShadowMap now handles the castShadows check internally
+            this.updateShadowMap(index, light);
         });
     }
     /**
@@ -16006,7 +16295,142 @@ class ShadowMapManager {
         }
         return shader;
     }
+    /**
+     * Enable or disable debug logging for shadow map operations.
+     * @param enabled - Whether to enable debug logging
+     */
+    static setDebugLogging(enabled) {
+        ShadowMapManager.DEBUG_SHADOWS = enabled;
+        console.log(`[ShadowMapManager] Debug logging ${enabled ? 'enabled' : 'disabled'}`);
+    }
+    /**
+     * Assigns a shadow map index to a light that casts shadows.
+     * @param lightId - The ID of the light
+     * @returns The shadow map index (0-7) or -1 if no slots available
+     */
+    assignShadowMapIndex(lightId) {
+        if (this.lightToShadowMapIndex.has(lightId)) {
+            const existingIndex = this.lightToShadowMapIndex.get(lightId);
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                console.log(`[ShadowMapManager] Light ${lightId} already has shadow map index ${existingIndex}`);
+            }
+            return existingIndex;
+        }
+        if (this.activeShadowMaps.size >= SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS) {
+            console.warn(`Cannot assign shadow map to light ${lightId}: maximum shadow maps (${SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS}) reached`);
+            return -1;
+        }
+        // Find the next available shadow map index
+        let shadowMapIndex = this.nextAvailableShadowMapIndex;
+        while (this.activeShadowMaps.has(shadowMapIndex) && shadowMapIndex < SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS) {
+            shadowMapIndex++;
+        }
+        if (shadowMapIndex >= SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS) {
+            // Wrap around and search from 0
+            shadowMapIndex = 0;
+            while (this.activeShadowMaps.has(shadowMapIndex) && shadowMapIndex < SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS) {
+                shadowMapIndex++;
+            }
+        }
+        if (shadowMapIndex >= SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS) {
+            console.warn(`Cannot assign shadow map to light ${lightId}: no available shadow map slots`);
+            return -1;
+        }
+        // Assign the shadow map index
+        this.lightToShadowMapIndex.set(lightId, shadowMapIndex);
+        this.shadowMapIndexToLightId.set(shadowMapIndex, lightId);
+        this.activeShadowMaps.add(shadowMapIndex);
+        this.nextAvailableShadowMapIndex = (shadowMapIndex + 1) % SHADOW_MAP_CONSTANTS.MAX_SHADOW_MAPS;
+        if (ShadowMapManager.DEBUG_SHADOWS) {
+            console.log(`[ShadowMapManager] Assigned shadow map index ${shadowMapIndex} to light ${lightId}. Active shadow maps: [${Array.from(this.activeShadowMaps).sort().join(', ')}]`);
+        }
+        return shadowMapIndex;
+    }
+    /**
+     * Releases a shadow map index when a light no longer casts shadows.
+     * @param lightId - The ID of the light
+     */
+    releaseShadowMapIndex(lightId) {
+        const shadowMapIndex = this.lightToShadowMapIndex.get(lightId);
+        if (shadowMapIndex !== undefined) {
+            this.lightToShadowMapIndex.delete(lightId);
+            this.shadowMapIndexToLightId.delete(shadowMapIndex);
+            this.activeShadowMaps.delete(shadowMapIndex);
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                console.log(`[ShadowMapManager] Released shadow map index ${shadowMapIndex} from light ${lightId}. Active shadow maps: [${Array.from(this.activeShadowMaps).sort().join(', ')}]`);
+            }
+        }
+    }
+    /**
+     * Gets the shadow map index for a given light ID.
+     * @param lightId - The ID of the light
+     * @returns The shadow map index (0-7) or -1 if not found
+     */
+    getLightShadowMapIndex(lightId) {
+        var _a;
+        return (_a = this.lightToShadowMapIndex.get(lightId)) !== null && _a !== void 0 ? _a : -1;
+    }
+    /**
+     * Gets the light ID for a given shadow map index.
+     * @param shadowMapIndex - The shadow map index (0-7)
+     * @returns The light ID or -1 if not found
+     */
+    getShadowMapLightId(shadowMapIndex) {
+        var _a;
+        return (_a = this.shadowMapIndexToLightId.get(shadowMapIndex)) !== null && _a !== void 0 ? _a : -1;
+    }
+    /**
+     * Gets all active shadow map indices.
+     * @returns Array of active shadow map indices (0-7)
+     */
+    getActiveShadowMapIndices() {
+        return Array.from(this.activeShadowMaps).sort();
+    }
+    /**
+     * Gets the mapping of light IDs to shadow map indices for all active shadow maps.
+     * @returns Map of lightId -> shadowMapIndex
+     */
+    getLightToShadowMapMapping() {
+        return new Map(this.lightToShadowMapIndex);
+    }
+    /**
+     * Gets shadow data by shadow map index instead of light ID.
+     * @param shadowMapIndex - The shadow map index (0-7)
+     * @returns Shadow data or null if not found
+     */
+    getShadowDataByIndex(shadowMapIndex) {
+        const lightId = this.shadowMapIndexToLightId.get(shadowMapIndex);
+        if (lightId === undefined) {
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                console.log(`[ShadowMapManager] getShadowDataByIndex(${shadowMapIndex}): No lightId found`);
+                console.log(`[ShadowMapManager] shadowMapIndexToLightId map:`, Array.from(this.shadowMapIndexToLightId.entries()));
+            }
+            return null;
+        }
+        const shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData || !shadowData.light.enabled) {
+            if (ShadowMapManager.DEBUG_SHADOWS) {
+                console.log(`[ShadowMapManager] getShadowDataByIndex(${shadowMapIndex}): No shadowData for light ${lightId} or light disabled`);
+            }
+            return null;
+        }
+        if (ShadowMapManager.DEBUG_SHADOWS) {
+            // Use the debug ID we assigned during creation
+            const textureId = shadowData.texture.__debugId || 'unknown';
+            console.log(`[ShadowMapManager] getShadowDataByIndex(${shadowMapIndex}) -> Light ${lightId}, texture ID: ${textureId}`);
+            console.log(`[ShadowMapManager] shadowMapIndexToLightId map:`, Array.from(this.shadowMapIndexToLightId.entries()));
+            console.log(`[ShadowMapManager] lightToShadowMapIndex map:`, Array.from(this.lightToShadowMapIndex.entries()));
+        }
+        return {
+            texture: shadowData.texture,
+            view: clone$1(shadowData.view),
+            projection: clone$1(shadowData.projection),
+            lightId: lightId
+        };
+    }
 }
+// Debug flag
+ShadowMapManager.DEBUG_SHADOWS = true; // Set to true to enable debug logging
 /** Default scene bounds used when no specific bounds are set */
 ShadowMapManager.DEFAULT_BOUNDS = {
     min: fromValues(-1000, -1000, -1000),
@@ -16155,15 +16579,27 @@ class InstanceManager {
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
             this.shadowMapManager.renderAllShadowMaps(this);
         }
-        // Set shadow map uniforms from shadowMapData lightId 0
-        const shadowMapData = this.shadowMapManager.getShadowData(0);
-        this.gpuResources.setShadowMapUniforms(this.defaultShaderProgram, shadowMapData !== null, // Enable only if we have shadow data
-        (shadowMapData === null || shadowMapData === void 0 ? void 0 : shadowMapData.texture) || null, shadowMapData ? multiply(create$3(), shadowMapData.projection, shadowMapData.view) : null);
+        // Set multiple shadow map uniforms using new multi-shadow system
+        if (this.shadowMapManager) {
+            {
+                const activeShadowMaps = this.shadowMapManager.getActiveShadowMapIndices();
+                console.log(`[InstanceManager] Frame render - Active shadow maps: [${activeShadowMaps.join(', ')}]`);
+            }
+            this.gpuResources.setMultipleShadowMapUniforms(this.defaultShaderProgram, this.shadowMapManager);
+        }
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
         if (this.shadowMapManager && this.debugShadowMap) {
-            this.shadowMapManager.renderShadowMapDebug(0);
+            // Debug the first active shadow map
+            const activeShadowMapIndices = this.shadowMapManager.getActiveShadowMapIndices();
+            if (activeShadowMapIndices.length > 0) {
+                const firstActiveShadowMapIndex = activeShadowMapIndices[0];
+                const lightId = this.shadowMapManager.getShadowMapLightId(firstActiveShadowMapIndex);
+                if (lightId >= 0) {
+                    this.shadowMapManager.renderShadowMapDebug(lightId);
+                }
+            }
         }
         this.gpuResources.gpuResourceCache.restoreModelMode();
         if (runtime)

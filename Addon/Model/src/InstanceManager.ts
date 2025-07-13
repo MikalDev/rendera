@@ -202,21 +202,35 @@ export class InstanceManager implements IInstanceManager {
             this.shadowMapManager.renderAllShadowMaps(this);
         }
 
-        // Set shadow map uniforms from shadowMapData lightId 0
-        const shadowMapData = this.shadowMapManager.getShadowData(0);
-        this.gpuResources.setShadowMapUniforms(
-            this.defaultShaderProgram,
-            shadowMapData !== null, // Enable only if we have shadow data
-            shadowMapData?.texture || null,
-            shadowMapData ? mat4.multiply(mat4.create(), shadowMapData.projection, shadowMapData.view) : null
-        );
+        // Set multiple shadow map uniforms using new multi-shadow system
+        if (this.shadowMapManager) {
+            // Debug: Log shadow setup once per frame (if debug enabled)
+            const DEBUG_SHADOWS = true; // Set to true to enable debug logging
+            if (DEBUG_SHADOWS) {
+                const activeShadowMaps = this.shadowMapManager.getActiveShadowMapIndices();
+                console.log(`[InstanceManager] Frame render - Active shadow maps: [${activeShadowMaps.join(', ')}]`);
+            }
+            
+            this.gpuResources.setMultipleShadowMapUniforms(
+                this.defaultShaderProgram,
+                this.shadowMapManager
+            );
+        }
 
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
 
         if (this.shadowMapManager && this.debugShadowMap) {
-            this.shadowMapManager.renderShadowMapDebug(0);
+            // Debug the first active shadow map
+            const activeShadowMapIndices = this.shadowMapManager.getActiveShadowMapIndices();
+            if (activeShadowMapIndices.length > 0) {
+                const firstActiveShadowMapIndex = activeShadowMapIndices[0];
+                const lightId = this.shadowMapManager.getShadowMapLightId(firstActiveShadowMapIndex);
+                if (lightId >= 0) {
+                    this.shadowMapManager.renderShadowMapDebug(lightId);
+                }
+            }
         }
 
         this.gpuResources.gpuResourceCache.restoreModelMode();

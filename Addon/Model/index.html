@@ -20,10 +20,32 @@
         #debugButton:hover {
             background-color: #666;
         }
+        #lightStatus {
+            position: fixed;
+            top: 50px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
     <button id="debugButton">Toggle Shadow Debug</button>
+    <div id="lightStatus">
+        <div>🔴 Light 0 (Red): ON | Shadows: ON</div>
+        <div>🟢 Light 1 (Green): ON | Shadows: ON</div>
+        <div>🔵 Light 2 (Blue): ON | Shadows: ON</div>
+        <div>🟠 Light 3 (Orange): ON | Shadows: ON</div>
+        <div style="margin-top: 8px; font-size: 11px;">
+            1-4: Toggle lights | Q-W-E-R: Toggle shadows<br>
+            H: Help | Click button: Debug view
+        </div>
+    </div>
     <canvas id="glCanvas" width="800" height="600"></canvas>
     <script type="module">
         // @ts-check
@@ -57,6 +79,20 @@
 
         // Initialize webgl2 for rendering and texture handling
         instanceManager.initialize();
+        
+        // Enable debug logging for shadow map system (now that managers are created)
+        console.log('Enabling debug logging for shadow map testing...');
+        try {
+            // These require the classes to be available, so we'll try to access them via the managers
+            if (instanceManager.shadowMapManager && instanceManager.shadowMapManager.constructor.setDebugLogging) {
+                instanceManager.shadowMapManager.constructor.setDebugLogging(true);
+            }
+            if (gpuResourceManager.constructor.setDebugLogging) {
+                gpuResourceManager.constructor.setDebugLogging(true);
+            }
+        } catch (e) {
+            console.log('Debug logging not available:', e);
+        }
 
         // Load model
         // @ts-ignore
@@ -111,70 +147,133 @@
         instance5.setScale(0.2, 0.2, 0.2);
 
         console.log('Instance set');
-        /*
-        gpuResourceManager.updateLight(0, {
-            type: 'directional',
-            castShadows: true,
-            enabled: true,
-            position: [0, 0, 400],
-            color: [1.0, 1.0, 1.0],
-            intensity: 4.0,
-            attenuation: 0.0000001,
-            direction: [0.5, 0.5, -1]
-        });
-        */
+        
+        // Enable debug logging for shadow map system
+        console.log('Enabling shadow map debug logging...');
+        // Note: These will be available once the modules are imported
+        // ShadowMapManager.setDebugLogging(true);
+        // GPUResourceManager.setDebugLogging(true);
+        
+        // Multi-Shadow Map Test Setup - 4 Different Colored Spotlights
+        console.log('Setting up multi-shadow map test with 4 spotlights...');
+        
+        // Light 0: Red spotlight from left side, angled towards center
         gpuResourceManager.updateLight(0, {
             type: 'spot',
             castShadows: true,
             enabled: true,
-            position: [-100, 0, 500],
-            color: [1.0, 0, 0],
-            intensity: 4.0,
+            position: [-200, 100, 200],
+            color: [1.0, 0.2, 0.2],  // Red light
+            intensity: 3.0,
             attenuation: 0.0000001,
-            direction: [0.1, 0, -1.0],
-            cosAngle: 0.98,
-            spotPenumbra: 0.0
+            direction: [0.6, -0.3, -0.7],
+            cosAngle: 0.85,  // ~32 degree cone
+            spotPenumbra: 0.05
         });
-        /*
+        
+        // Light 1: Green spotlight from right side, angled towards center
+        gpuResourceManager.updateLight(1, {
+            type: 'spot',
+            castShadows: true,
+            enabled: true,
+            position: [200, 80, 250],
+            color: [0.2, 1.0, 0.3],  // Green light
+            intensity: 3.5,
+            attenuation: 0.0000001,
+            direction: [-0.5, -0.2, -0.8],
+            cosAngle: 0.8,   // ~36 degree cone
+            spotPenumbra: 0.08
+        });
+        
+        // Light 2: Blue spotlight from above, pointing down
         gpuResourceManager.updateLight(2, {
             type: 'spot',
+            castShadows: true,
             enabled: true,
-            position: [100, 30, 400],
-            color: [0.0, 0, 1.0],
-            intensity: 4.0,
+            position: [0, 300, 100],
+            color: [0.3, 0.4, 1.0],  // Blue light
+            intensity: 2.8,
             attenuation: 0.0000001,
-            direction: [0, 0, -1],
-            cosAngle: 0.99,
-            spotPenumbra: 0.001
+            direction: [0, -0.8, -0.6],
+            cosAngle: 0.75,  // ~41 degree cone
+            spotPenumbra: 0.1
         });
+        
+        // Light 3: Orange spotlight from behind/right for rim lighting
         gpuResourceManager.updateLight(3, {
             type: 'spot',
+            castShadows: true,
             enabled: true,
-            position: [0, 30, 400],
-            color: [0.0, 1.0, 0.0],
-            intensity: 4.0,
+            position: [150, 50, 400],
+            color: [1.0, 0.6, 0.1],  // Orange light
+            intensity: 2.5,
             attenuation: 0.0000001,
-            direction: [0, 0, -1],
-            cosAngle: 0.99,
-            spotPenumbra: 0.001
+            direction: [-0.3, -0.1, -0.9],
+            cosAngle: 0.9,   // ~25 degree cone
+            spotPenumbra: 0.03
         });
-        */
+        
+        console.log('Multi-shadow setup complete! 4 spotlights with different colors:');
+        console.log('  Light 0: Red from left');
+        console.log('  Light 1: Green from right'); 
+        console.log('  Light 2: Blue from above');
+        console.log('  Light 3: Orange from behind');
         gpuResourceManager.updateCameraPosition([0, 0, 300]);
     
         // Create view projection matrix
         // @ts-ignore
         const viewProjection = instanceManager.createViewProjection(60, { width: canvas.width, height: canvas.height }, 0.1, 1000, [0, 0, 300], [0, 0, 0], [0, 1, 0]);
 
-        // Render
+        // Show initial help
+        console.log('=== Multi-Shadow Map Test Started ===');
+        console.log('4 spotlights configured with different colors');
+        console.log('Press H for controls, or use:');
+        console.log('  1-4: Toggle lights on/off');
+        console.log('  Q-W-E-R: Toggle shadows for lights 0-3');
+        console.log('  Click button: Toggle shadow debug');
+        
+        // Initial render
         instanceManager.render(viewProjection);
 
         let rotation = 0;
         let normalMapEnabled = false;
         let debugShadowMapEnabled = false;
+        
+        // Function to update light status display
+        function updateLightStatusDisplay() {
+            const statusDiv = document.getElementById('lightStatus');
+            if (!statusDiv) return;
+            
+            const lights = gpuResourceManager.lights;
+            const lightInfo = [
+                { emoji: '🔴', name: 'Red', color: 'red' },
+                { emoji: '🟢', name: 'Green', color: 'green' },
+                { emoji: '🔵', name: 'Blue', color: 'blue' },
+                { emoji: '🟠', name: 'Orange', color: 'orange' }
+            ];
+            
+            let html = '';
+            for (let i = 0; i < 4; i++) {
+                const light = lights[i];
+                const info = lightInfo[i];
+                const enabled = light.enabled ? 'ON' : 'OFF';
+                const shadows = light.castShadows ? 'ON' : 'OFF';
+                const enabledStyle = light.enabled ? '' : 'opacity: 0.5;';
+                html += `<div style="${enabledStyle}">${info.emoji} Light ${i} (${info.name}): ${enabled} | Shadows: ${shadows}</div>`;
+            }
+            html += `<div style="margin-top: 8px; font-size: 11px;">
+                1-4: Toggle lights | Q-W-E-R: Toggle shadows<br>
+                H: Help | Click button: Debug view
+            </div>`;
+            
+            statusDiv.innerHTML = html;
+        }
 
         // Add event listeners outside the render loop
         document.addEventListener('keydown', (event) => {
-            if (event.key.toLowerCase() === 'n') {
+            const key = event.key.toLowerCase();
+            
+            if (key === 'n') {
                 normalMapEnabled = !normalMapEnabled;
                 if (instance.setNormalMapEnabled) {
                     instance.setNormalMapEnabled(normalMapEnabled);
@@ -185,6 +284,76 @@
                 }
                 console.log('Normal map enabled:', normalMapEnabled);
             }
+            
+            // Multi-Shadow Testing Controls
+            else if (key === '1') {
+                // Toggle Light 0 (Red)
+                const currentState = gpuResourceManager.lights[0].enabled;
+                gpuResourceManager.setLightEnabled(0, !currentState);
+                console.log(`Light 0 (Red) ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            else if (key === '2') {
+                // Toggle Light 1 (Green)
+                const currentState = gpuResourceManager.lights[1].enabled;
+                gpuResourceManager.setLightEnabled(1, !currentState);
+                console.log(`Light 1 (Green) ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            else if (key === '3') {
+                // Toggle Light 2 (Blue)
+                const currentState = gpuResourceManager.lights[2].enabled;
+                gpuResourceManager.setLightEnabled(2, !currentState);
+                console.log(`Light 2 (Blue) ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            else if (key === '4') {
+                // Toggle Light 3 (Orange)
+                const currentState = gpuResourceManager.lights[3].enabled;
+                gpuResourceManager.setLightEnabled(3, !currentState);
+                console.log(`Light 3 (Orange) ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            
+            // Shadow casting controls
+            else if (key === 'q') {
+                // Toggle shadows for Light 0
+                const currentState = gpuResourceManager.lights[0].castShadows;
+                gpuResourceManager.setLightCastShadows(0, !currentState);
+                console.log(`Light 0 shadows ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            else if (key === 'w') {
+                // Toggle shadows for Light 1
+                const currentState = gpuResourceManager.lights[1].castShadows;
+                gpuResourceManager.setLightCastShadows(1, !currentState);
+                console.log(`Light 1 shadows ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            else if (key === 'e') {
+                // Toggle shadows for Light 2
+                const currentState = gpuResourceManager.lights[2].castShadows;
+                gpuResourceManager.setLightCastShadows(2, !currentState);
+                console.log(`Light 2 shadows ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            else if (key === 'r') {
+                // Toggle shadows for Light 3
+                const currentState = gpuResourceManager.lights[3].castShadows;
+                gpuResourceManager.setLightCastShadows(3, !currentState);
+                console.log(`Light 3 shadows ${!currentState ? 'enabled' : 'disabled'}`);
+                updateLightStatusDisplay();
+            }
+            
+            // Help
+            else if (key === 'h') {
+                console.log('=== Multi-Shadow Map Test Controls ===');
+                console.log('N: Toggle normal maps');
+                console.log('1-4: Toggle lights 0-3 on/off');
+                console.log('Q-W-E-R: Toggle shadows for lights 0-3');
+                console.log('H: Show this help');
+                console.log('Click button: Toggle shadow debug rendering');
+            }
         });
 
         // Add debug shadow map toggle button handler
@@ -193,6 +362,19 @@
             debugButton.addEventListener('click', () => {
                 debugShadowMapEnabled = !debugShadowMapEnabled;
                 instanceManager.setDebugShadowMap(debugShadowMapEnabled);
+                
+                // Enable debug logging for better diagnostics
+                console.log('=== Shadow Debug Info ===');
+                const activeShadowMaps = instanceManager.shadowMapManager.getActiveShadowMapIndices();
+                console.log('Active shadow map indices:', activeShadowMaps);
+                const lightToShadowMapping = instanceManager.shadowMapManager.getLightToShadowMapMapping();
+                console.log('Light to shadow map mapping:', Array.from(lightToShadowMapping.entries()));
+                
+                // Log current light states
+                console.log('Current light states:');
+                instanceManager.gpuResources.lights.forEach((light, i) => {
+                    console.log(`  Light ${i}: enabled=${light.enabled}, castShadows=${light.castShadows}, type=${light.type}, color=[${light.color[0].toFixed(2)}, ${light.color[1].toFixed(2)}, ${light.color[2].toFixed(2)}]`);
+                });
             });
         }
 

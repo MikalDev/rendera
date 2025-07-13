@@ -63,6 +63,11 @@ export declare class ShadowMapManager {
     private resolution;
     private sceneBounds;
     private shadowMapShader;
+    private lightToShadowMapIndex;
+    private shadowMapIndexToLightId;
+    private activeShadowMaps;
+    private nextAvailableShadowMapIndex;
+    private static DEBUG_SHADOWS;
     /** Default scene bounds used when no specific bounds are set */
     private static readonly DEFAULT_BOUNDS;
     private readonly matrixPool;
@@ -204,7 +209,7 @@ export declare class ShadowMapManager {
     renderAllShadowMaps(instanceManager: InstanceManager): void;
     /**
      * Updates all shadow maps using the provided array of lights.
-     * Iterates over the lights and updates the shadow map for each enabled light.
+     * Iterates over the lights and updates the shadow map for each enabled light that casts shadows.
      * @param lights - Array of lights to update shadow maps for
      */
     updateAllShadowMaps(lights: Light[]): void;
@@ -228,6 +233,55 @@ export declare class ShadowMapManager {
      */
     private compileShader;
     private debugShaderProgram;
+    /**
+     * Enable or disable debug logging for shadow map operations.
+     * @param enabled - Whether to enable debug logging
+     */
+    static setDebugLogging(enabled: boolean): void;
+    /**
+     * Assigns a shadow map index to a light that casts shadows.
+     * @param lightId - The ID of the light
+     * @returns The shadow map index (0-7) or -1 if no slots available
+     */
+    private assignShadowMapIndex;
+    /**
+     * Releases a shadow map index when a light no longer casts shadows.
+     * @param lightId - The ID of the light
+     */
+    private releaseShadowMapIndex;
+    /**
+     * Gets the shadow map index for a given light ID.
+     * @param lightId - The ID of the light
+     * @returns The shadow map index (0-7) or -1 if not found
+     */
+    getLightShadowMapIndex(lightId: number): number;
+    /**
+     * Gets the light ID for a given shadow map index.
+     * @param shadowMapIndex - The shadow map index (0-7)
+     * @returns The light ID or -1 if not found
+     */
+    getShadowMapLightId(shadowMapIndex: number): number;
+    /**
+     * Gets all active shadow map indices.
+     * @returns Array of active shadow map indices (0-7)
+     */
+    getActiveShadowMapIndices(): number[];
+    /**
+     * Gets the mapping of light IDs to shadow map indices for all active shadow maps.
+     * @returns Map of lightId -> shadowMapIndex
+     */
+    getLightToShadowMapMapping(): Map<number, number>;
+    /**
+     * Gets shadow data by shadow map index instead of light ID.
+     * @param shadowMapIndex - The shadow map index (0-7)
+     * @returns Shadow data or null if not found
+     */
+    getShadowDataByIndex(shadowMapIndex: number): {
+        texture: WebGLTexture;
+        view: mat4;
+        projection: mat4;
+        lightId: number;
+    } | null;
 }
 export {};
 //# sourceMappingURL=ShadowMapManager.d.ts.map
