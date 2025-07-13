@@ -1,9 +1,11 @@
 import { IGPUResourceManager, IGPUResourceCache, Light, ModelData } from './types';
 import { mat4 } from 'gl-matrix';
+import type { ShadowMapManager } from './ShadowMapManager';
 export declare class GPUResourceManager implements IGPUResourceManager {
     private gl;
     private shaderSystem;
     gpuResourceCache: IGPUResourceCache;
+    private static DEBUG_SHADOWS;
     private buffers;
     private textures;
     private vaos;
@@ -40,7 +42,22 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     setLightColor(index: number, color: [number, number, number]): void;
     setLightIntensity(index: number, intensity: number): void;
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
+    setLightCastShadows(index: number, castShadows: boolean): void;
+    private validateShadowCount;
+    /**
+     * @deprecated Use setMultipleShadowMapUniforms instead
+     */
     setShadowMapUniforms(shader: WebGLProgram, enabled: boolean, shadowMap?: WebGLTexture | null, lightViewProjection?: mat4 | null, bias?: number): void;
+    /**
+     * Sets uniforms for multiple shadow maps using data from ShadowMapManager.
+     * This method replaces setShadowMapUniforms for the new multi-shadow architecture.
+     */
+    setMultipleShadowMapUniforms(shader: WebGLProgram, shadowMapManager: ShadowMapManager, bias?: number): void;
+    /**
+     * Enable or disable debug logging for GPU resource operations.
+     * @param enabled - Whether to enable debug logging
+     */
+    static setDebugLogging(enabled: boolean): void;
     getShadowMapShader(): WebGLProgram;
 }
 export declare class ShaderSystem {

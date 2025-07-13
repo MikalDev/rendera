@@ -233,12 +233,18 @@ export interface IGPUResourceManager {
     setLightColor(index: number, color: [number, number, number]): void;
     setLightIntensity(index: number, intensity: number): void;
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
+    setLightCastShadows(index: number, castShadows: boolean): void;
     bindShaderAndMaterial(shader: WebGLProgram, materialIndex: number, modelData: ModelData): void;
     setShadowMapUniforms(
         shader: WebGLProgram, 
         enabled: boolean, 
         shadowMap: WebGLTexture | null,
         lightViewProjection: mat4 | null,
+        bias?: number
+    ): void;
+    setMultipleShadowMapUniforms(
+        shader: WebGLProgram,
+        shadowMapManager: any, // ShadowMapManager type would create circular dependency
         bias?: number
     ): void;
     getShadowMapShader(): WebGLProgram;
