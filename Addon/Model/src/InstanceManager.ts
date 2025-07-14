@@ -205,7 +205,7 @@ export class InstanceManager implements IInstanceManager {
         // Set multiple shadow map uniforms using new multi-shadow system
         if (this.shadowMapManager) {
             // Debug: Log shadow setup once per frame (if debug enabled)
-            const DEBUG_SHADOWS = true; // Set to true to enable debug logging
+            const DEBUG_SHADOWS = false; // Set to true to enable debug logging
             if (DEBUG_SHADOWS) {
                 const activeShadowMaps = this.shadowMapManager.getActiveShadowMapIndices();
                 console.log(`[InstanceManager] Frame render - Active shadow maps: [${activeShadowMaps.join(', ')}]`);
@@ -379,7 +379,6 @@ export class InstanceManager implements IInstanceManager {
                     const modelMatrixLoc = this.gl.getUniformLocation(shader, 'u_Model');
                     const normalMatrixLoc = this.gl.getUniformLocation(shader, 'u_NormalMatrix');
                     const nodeMatrixLoc = this.gl.getUniformLocation(shader, 'u_NodeMatrix');
-                    const nodeBonesMatricesLoc = this.gl.getUniformLocation(shader, 'u_BoneMatrices');
                     const useSkinningLoc = this.gl.getUniformLocation(shader, 'u_UseSkinning');
                     this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
                     this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
@@ -396,12 +395,10 @@ export class InstanceManager implements IInstanceManager {
                     }
 
                     let noBoneMatrices = true;
-                    if (nodeBonesMatricesLoc) {
-                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
-                        if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
-                            this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
-                            noBoneMatrices = false;
-                        }
+                    const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                        this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
+                        noBoneMatrices = false;
                     }
                     if (useSkinningLoc) {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
@@ -475,7 +472,6 @@ export class InstanceManager implements IInstanceManager {
                     const viewProjLoc = this.gl.getUniformLocation(shadowShader, 'u_LightViewProjection');
                     const modelMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_Model');
                     const nodeMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_NodeMatrix');
-                    const nodeBonesMatricesLoc = this.gl.getUniformLocation(shadowShader, 'u_BoneMatrices');
                     const useSkinningLoc = this.gl.getUniformLocation(shadowShader, 'u_UseSkinning');
 
                     // Combine view and projection for efficiency
@@ -498,12 +494,10 @@ export class InstanceManager implements IInstanceManager {
 
                     // Handle skinning
                     let noBoneMatrices = true;
-                    if (nodeBonesMatricesLoc) {
-                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
-                        if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
-                            this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
-                            noBoneMatrices = false;
-                        }
+                    const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                        this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
+                        noBoneMatrices = false;
                     }
                     if (useSkinningLoc) {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);

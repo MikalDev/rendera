@@ -85,10 +85,10 @@
         try {
             // These require the classes to be available, so we'll try to access them via the managers
             if (instanceManager.shadowMapManager && instanceManager.shadowMapManager.constructor.setDebugLogging) {
-                instanceManager.shadowMapManager.constructor.setDebugLogging(true);
+                instanceManager.shadowMapManager.constructor.setDebugLogging(false);
             }
             if (gpuResourceManager.constructor.setDebugLogging) {
-                gpuResourceManager.constructor.setDebugLogging(true);
+                gpuResourceManager.constructor.setDebugLogging(false);
             }
         } catch (e) {
             console.log('Debug logging not available:', e);
@@ -389,10 +389,10 @@
             // Clear color and depth buffers
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
             // Animate the instance
-            instance.updateAnimation(0.001);
-            instance2.updateAnimation(0.001);
-            instance3.updateAnimation(0.001);
-            instance5.updateAnimation(0.001);
+            instance.updateAnimation(0.004);
+            instance2.updateAnimation(0.004);
+            instance3.updateAnimation(0.004);
+            instance5.updateAnimation(0.004);
             rotation += 0.01;
             /*
             instance.setQuaternion(

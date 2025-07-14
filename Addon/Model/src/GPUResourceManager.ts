@@ -1,6 +1,6 @@
 import { ModelError, ModelErrorCode } from './errors';
 import { GPUResourceCache } from './GPUResourceCache';
-import { IGPUResourceManager, IGPUResourceCache, Light, ModelData } from './types';
+import { IGPUResourceManager, IGPUResourceCache, Light, ModelData, MAX_BONES } from './types';
 import { mat4 } from 'gl-matrix';
 import type { ShadowMapManager } from './ShadowMapManager';
 
@@ -10,7 +10,7 @@ export class GPUResourceManager implements IGPUResourceManager {
     public gpuResourceCache: IGPUResourceCache;
     
     // Debug flag
-    private static DEBUG_SHADOWS = true; // Set to true to enable debug logging
+    private static DEBUG_SHADOWS = false; // Set to true to enable debug logging
     
     // Track resources for cleanup
     private buffers: Set<WebGLBuffer> = new Set();
@@ -24,6 +24,10 @@ export class GPUResourceManager implements IGPUResourceManager {
 
     private cameraPosition: [number, number, number] = [0, 0, 0];
     private dirtyCameraPosition: boolean = false;
+
+    // UBO for bone matrices
+    private boneUBO: WebGLBuffer | null = null;
+    private readonly BONE_UBO_BINDING_POINT = 0;
 
     constructor(gl: WebGL2RenderingContext) {
         this.gl = gl;
@@ -41,6 +45,9 @@ export class GPUResourceManager implements IGPUResourceManager {
             direction: [0, 0, -1]
         }));
         this.gpuResourceCache = new GPUResourceCache(gl);
+        
+        // Initialize and bind the bone UBO to ensure it's always available
+        this.initializeBoneUBO();
     }
 
     createBuffer(data: BufferSource, usage: number): WebGLBuffer {
@@ -126,6 +133,56 @@ export class GPUResourceManager implements IGPUResourceManager {
         return vao;
     }
 
+    // UBO management methods
+    private initializeBoneUBO(): void {
+        if (this.boneUBO) return;
+        
+        this.boneUBO = this.gl.createBuffer();
+        if (!this.boneUBO) {
+            throw this.createError(
+                ModelErrorCode.GL_ERROR,
+                'Failed to create bone UBO'
+            );
+        }
+        
+        this.gl.bindBuffer(this.gl.UNIFORM_BUFFER, this.boneUBO);
+        // Allocate space for MAX_BONES matrices (each matrix is 64 bytes)
+        const sizeInBytes = MAX_BONES * 64;
+        this.gl.bufferData(this.gl.UNIFORM_BUFFER, sizeInBytes, this.gl.DYNAMIC_DRAW);
+        
+        // Always bind the UBO to the binding point so it's available for shaders
+        this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, this.BONE_UBO_BINDING_POINT, this.boneUBO);
+        
+        // Track this buffer for cleanup
+        this.buffers.add(this.boneUBO);
+    }
+
+    public updateBoneUBO(boneMatrices: Float32Array, boneCount: number): void {
+        if (!this.boneUBO) {
+            this.initializeBoneUBO();
+        }
+        
+        // Validate bone count
+        if (boneCount > MAX_BONES) {
+            throw this.createError(
+                ModelErrorCode.GL_ERROR,
+                `Bone count ${boneCount} exceeds maximum of ${MAX_BONES}`
+            );
+        }
+        
+        this.gl.bindBuffer(this.gl.UNIFORM_BUFFER, this.boneUBO);
+        this.gl.bufferSubData(this.gl.UNIFORM_BUFFER, 0, boneMatrices);
+        this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, this.BONE_UBO_BINDING_POINT, this.boneUBO);
+    }
+
+    public linkUniformBlocks(program: WebGLProgram): void {
+        // Link the BoneData uniform block to the binding point
+        const boneBlockIndex = this.gl.getUniformBlockIndex(program, 'BoneData');
+        if (boneBlockIndex !== this.gl.INVALID_INDEX) {
+            this.gl.uniformBlockBinding(program, boneBlockIndex, this.BONE_UBO_BINDING_POINT);
+        }
+    }
+
     // Resource cleanup
     dispose(): void {
         // Clean up all resources
@@ -175,13 +232,16 @@ export class GPUResourceManager implements IGPUResourceManager {
         layout(location = 4) in vec4 weights;
         layout(location = 5) in vec4 tangent;
 
-        const int MAX_BONES = 64;
+        const int MAX_BONES = 256;
         const int MAX_SHADOW_MAPS = 8;
+
+        layout(std140) uniform BoneData {
+            mat4 u_BoneMatrices[MAX_BONES];
+        };
 
         uniform mat4 u_Model;
         uniform mat4 u_View;
         uniform mat4 u_Projection;
-        uniform mat4 u_BoneMatrices[MAX_BONES];  // Maximum number of joints
         uniform mat3 u_NormalMatrix;
         uniform mat4 u_NodeMatrix;
         uniform bool u_UseSkinning;
@@ -555,7 +615,9 @@ export class GPUResourceManager implements IGPUResourceManager {
             fragColor = vec4(color, baseColorSample.a);
         }`;
 
-        return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
+        const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
+        this.linkUniformBlocks(program);
+        return program;
     }
 
     updateLight(index: number, lightParams: Partial<Light>): void {
@@ -881,13 +943,16 @@ export class GPUResourceManager implements IGPUResourceManager {
         layout(location = 3) in uvec4 joints;
         layout(location = 4) in vec4 weights;
 
-        const int MAX_BONES = 64;
+        const int MAX_BONES = 256;
+
+        layout(std140) uniform BoneData {
+            mat4 u_BoneMatrices[MAX_BONES];
+        };
 
         uniform mat4 u_Model;
         uniform mat4 u_NodeMatrix;
         uniform mat4 u_LightViewProjection;
         uniform bool u_UseSkinning;
-        uniform mat4 u_BoneMatrices[MAX_BONES];
 
         void main() {
             // Set position to the vertex position
@@ -913,7 +978,9 @@ export class GPUResourceManager implements IGPUResourceManager {
             // The depth is automatically written
         }`;
 
-        return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
+        const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
+        this.linkUniformBlocks(program);
+        return program;
     }
 }
 
