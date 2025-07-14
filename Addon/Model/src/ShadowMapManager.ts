@@ -84,7 +84,7 @@ export class ShadowMapManager {
     private nextAvailableShadowMapIndex: number = 0;
     
     // Debug flag
-    private static DEBUG_SHADOWS = true; // Set to true to enable debug logging
+    private static DEBUG_SHADOWS = false; // Set to true to enable debug logging
     /** Default scene bounds used when no specific bounds are set */
     private static readonly DEFAULT_BOUNDS: SceneBounds = {
         min: vec3.fromValues(-1000, -1000, -1000),
@@ -118,7 +118,6 @@ export class ShadowMapManager {
         this.activeShadowMaps = new Set();
         this.nextAvailableShadowMapIndex = 0;
         
-        console.log('ShadowMapManager constructor');
     }
 
     /**
@@ -255,7 +254,6 @@ export class ShadowMapManager {
                 // Create a unique identifier for this texture
                 const textureId = performance.now().toString(36).substr(2, 5);
                 (texture as any).__debugId = textureId;
-                console.log(`[ShadowMapManager] Created texture ${textureId} (obj: ${texture}) and framebuffer ${framebuffer} for light ${light.type}`);
             }
 
             // Setup texture

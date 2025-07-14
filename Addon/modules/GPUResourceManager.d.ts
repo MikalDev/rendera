@@ -15,6 +15,8 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     private dirtyLightStates;
     private cameraPosition;
     private dirtyCameraPosition;
+    private boneUBO;
+    private readonly BONE_UBO_BINDING_POINT;
     constructor(gl: WebGL2RenderingContext);
     createBuffer(data: BufferSource, usage: number): WebGLBuffer;
     createIndexBuffer(data: BufferSource, usage: number): WebGLBuffer;
@@ -23,6 +25,9 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     deleteTexture(texture: WebGLTexture): void;
     deleteVertexArray(vao: WebGLVertexArrayObject): void;
     createVertexArray(): WebGLVertexArrayObject;
+    private initializeBoneUBO;
+    updateBoneUBO(boneMatrices: Float32Array, boneCount: number): void;
+    linkUniformBlocks(program: WebGLProgram): void;
     dispose(): void;
     private createError;
     getShader(modelId: string): WebGLProgram;

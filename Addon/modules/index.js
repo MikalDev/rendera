@@ -6777,6 +6777,7 @@ function createModelError(code, message, modelId) {
 }
 
 /// <reference lib="dom" />
+const MAX_BONES = 256;
 // Define a fixed mapping from sampler names to texture units
 const SAMPLER_TEXTURE_UNIT_MAP = {
     'u_BaseColorSampler': 0,
@@ -14296,6 +14297,9 @@ class GPUResourceManager {
         this.dirtyLightStates = new Set();
         this.cameraPosition = [0, 0, 0];
         this.dirtyCameraPosition = false;
+        // UBO for bone matrices
+        this.boneUBO = null;
+        this.BONE_UBO_BINDING_POINT = 0;
         this.gl = gl;
         this.shaderSystem = new ShaderSystem(gl);
         // Initialize lights array with default values
@@ -14310,6 +14314,8 @@ class GPUResourceManager {
             direction: [0, 0, -1]
         }));
         this.gpuResourceCache = new GPUResourceCache(gl);
+        // Initialize and bind the bone UBO to ensure it's always available
+        this.initializeBoneUBO();
     }
     createBuffer(data, usage) {
         const buffer = this.gl.createBuffer();
@@ -14364,6 +14370,42 @@ class GPUResourceManager {
         this.vaos.add(vao);
         return vao;
     }
+    // UBO management methods
+    initializeBoneUBO() {
+        if (this.boneUBO)
+            return;
+        this.boneUBO = this.gl.createBuffer();
+        if (!this.boneUBO) {
+            throw this.createError(ModelErrorCode.GL_ERROR, 'Failed to create bone UBO');
+        }
+        this.gl.bindBuffer(this.gl.UNIFORM_BUFFER, this.boneUBO);
+        // Allocate space for MAX_BONES matrices (each matrix is 64 bytes)
+        const sizeInBytes = MAX_BONES * 64;
+        this.gl.bufferData(this.gl.UNIFORM_BUFFER, sizeInBytes, this.gl.DYNAMIC_DRAW);
+        // Always bind the UBO to the binding point so it's available for shaders
+        this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, this.BONE_UBO_BINDING_POINT, this.boneUBO);
+        // Track this buffer for cleanup
+        this.buffers.add(this.boneUBO);
+    }
+    updateBoneUBO(boneMatrices, boneCount) {
+        if (!this.boneUBO) {
+            this.initializeBoneUBO();
+        }
+        // Validate bone count
+        if (boneCount > MAX_BONES) {
+            throw this.createError(ModelErrorCode.GL_ERROR, `Bone count ${boneCount} exceeds maximum of ${MAX_BONES}`);
+        }
+        this.gl.bindBuffer(this.gl.UNIFORM_BUFFER, this.boneUBO);
+        this.gl.bufferSubData(this.gl.UNIFORM_BUFFER, 0, boneMatrices);
+        this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, this.BONE_UBO_BINDING_POINT, this.boneUBO);
+    }
+    linkUniformBlocks(program) {
+        // Link the BoneData uniform block to the binding point
+        const boneBlockIndex = this.gl.getUniformBlockIndex(program, 'BoneData');
+        if (boneBlockIndex !== this.gl.INVALID_INDEX) {
+            this.gl.uniformBlockBinding(program, boneBlockIndex, this.BONE_UBO_BINDING_POINT);
+        }
+    }
     // Resource cleanup
     dispose() {
         // Clean up all resources
@@ -14405,13 +14447,16 @@ class GPUResourceManager {
         layout(location = 4) in vec4 weights;
         layout(location = 5) in vec4 tangent;
 
-        const int MAX_BONES = 64;
+        const int MAX_BONES = 256;
         const int MAX_SHADOW_MAPS = 8;
+
+        layout(std140) uniform BoneData {
+            mat4 u_BoneMatrices[MAX_BONES];
+        };
 
         uniform mat4 u_Model;
         uniform mat4 u_View;
         uniform mat4 u_Projection;
-        uniform mat4 u_BoneMatrices[MAX_BONES];  // Maximum number of joints
         uniform mat3 u_NormalMatrix;
         uniform mat4 u_NodeMatrix;
         uniform bool u_UseSkinning;
@@ -14783,7 +14828,9 @@ class GPUResourceManager {
 
             fragColor = vec4(color, baseColorSample.a);
         }`;
-        return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
+        const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
+        this.linkUniformBlocks(program);
+        return program;
     }
     updateLight(index, lightParams) {
         if (index >= this.MAX_LIGHTS)
@@ -15059,13 +15106,16 @@ class GPUResourceManager {
         layout(location = 3) in uvec4 joints;
         layout(location = 4) in vec4 weights;
 
-        const int MAX_BONES = 64;
+        const int MAX_BONES = 256;
+
+        layout(std140) uniform BoneData {
+            mat4 u_BoneMatrices[MAX_BONES];
+        };
 
         uniform mat4 u_Model;
         uniform mat4 u_NodeMatrix;
         uniform mat4 u_LightViewProjection;
         uniform bool u_UseSkinning;
-        uniform mat4 u_BoneMatrices[MAX_BONES];
 
         void main() {
             // Set position to the vertex position
@@ -15089,11 +15139,13 @@ class GPUResourceManager {
             // No color output needed for shadow map
             // The depth is automatically written
         }`;
-        return this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
+        const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
+        this.linkUniformBlocks(program);
+        return program;
     }
 }
 // Debug flag
-GPUResourceManager.DEBUG_SHADOWS = true; // Set to true to enable debug logging
+GPUResourceManager.DEBUG_SHADOWS = false; // Set to true to enable debug logging
 // ShaderSystem for managing shaders and programs
 class ShaderSystem {
     constructor(gl) {
@@ -15602,7 +15654,6 @@ class ShadowMapManager {
         this.shadowMapIndexToLightId = new Map();
         this.activeShadowMaps = new Set();
         this.nextAvailableShadowMapIndex = 0;
-        console.log('ShadowMapManager constructor');
     }
     /**
      * Initializes the shadow map manager with the specified settings.
@@ -15722,7 +15773,6 @@ class ShadowMapManager {
                 // Create a unique identifier for this texture
                 const textureId = performance.now().toString(36).substr(2, 5);
                 texture.__debugId = textureId;
-                console.log(`[ShadowMapManager] Created texture ${textureId} (obj: ${texture}) and framebuffer ${framebuffer} for light ${light.type}`);
             }
             // Setup texture
             this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
@@ -16430,7 +16480,7 @@ class ShadowMapManager {
     }
 }
 // Debug flag
-ShadowMapManager.DEBUG_SHADOWS = true; // Set to true to enable debug logging
+ShadowMapManager.DEBUG_SHADOWS = false; // Set to true to enable debug logging
 /** Default scene bounds used when no specific bounds are set */
 ShadowMapManager.DEFAULT_BOUNDS = {
     min: fromValues(-1000, -1000, -1000),
@@ -16581,10 +16631,6 @@ class InstanceManager {
         }
         // Set multiple shadow map uniforms using new multi-shadow system
         if (this.shadowMapManager) {
-            {
-                const activeShadowMaps = this.shadowMapManager.getActiveShadowMapIndices();
-                console.log(`[InstanceManager] Frame render - Active shadow maps: [${activeShadowMaps.join(', ')}]`);
-            }
             this.gpuResources.setMultipleShadowMapUniforms(this.defaultShaderProgram, this.shadowMapManager);
         }
         for (const [modelId, instanceGroup] of this.instancesByModel) {
@@ -16718,7 +16764,6 @@ class InstanceManager {
                     const modelMatrixLoc = this.gl.getUniformLocation(shader, 'u_Model');
                     const normalMatrixLoc = this.gl.getUniformLocation(shader, 'u_NormalMatrix');
                     const nodeMatrixLoc = this.gl.getUniformLocation(shader, 'u_NodeMatrix');
-                    const nodeBonesMatricesLoc = this.gl.getUniformLocation(shader, 'u_BoneMatrices');
                     const useSkinningLoc = this.gl.getUniformLocation(shader, 'u_UseSkinning');
                     this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
                     this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
@@ -16735,12 +16780,10 @@ class InstanceManager {
                         }
                     }
                     let noBoneMatrices = true;
-                    if (nodeBonesMatricesLoc) {
-                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
-                        if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
-                            this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
-                            noBoneMatrices = false;
-                        }
+                    const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                        this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
+                        noBoneMatrices = false;
                     }
                     if (useSkinningLoc) {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
@@ -16795,7 +16838,6 @@ class InstanceManager {
                     const viewProjLoc = this.gl.getUniformLocation(shadowShader, 'u_LightViewProjection');
                     const modelMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_Model');
                     const nodeMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_NodeMatrix');
-                    const nodeBonesMatricesLoc = this.gl.getUniformLocation(shadowShader, 'u_BoneMatrices');
                     const useSkinningLoc = this.gl.getUniformLocation(shadowShader, 'u_UseSkinning');
                     // Combine view and projection for efficiency
                     const lightViewProj = multiply(create$3(), viewProjection.projection, viewProjection.view);
@@ -16815,12 +16857,10 @@ class InstanceManager {
                     }
                     // Handle skinning
                     let noBoneMatrices = true;
-                    if (nodeBonesMatricesLoc) {
-                        const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
-                        if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
-                            this.gl.uniformMatrix4fv(nodeBonesMatricesLoc, false, nodeBoneMatrices);
-                            noBoneMatrices = false;
-                        }
+                    const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                        this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
+                        noBoneMatrices = false;
                     }
                     if (useSkinningLoc) {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);

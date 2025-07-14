@@ -2,7 +2,7 @@ import { Model } from './Model';
 import { Node, Animation, Scene } from '@gltf-transform/core';
 import { mat4, vec3, vec4 } from 'gl-matrix';
 import { MaterialSystem } from './MaterialSystem';
-export declare const MAX_BONES = 64;
+export declare const MAX_BONES = 256;
 export interface IAnimationTarget {
     updateTransform(path: 'translation' | 'rotation' | 'scale', values: Float32Array): void;
 }
