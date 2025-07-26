@@ -14,7 +14,8 @@
     "copy-gl-matrix": "copyfiles -u 1 src/gl-matrix.js ../modules/",
     "build": "npm run build-clean && npm run build-clean-modules && npm run build-dist && npm run copy && npm run copy-gl-matrix",
     "docs": "typedoc --out docs src/ShadowMapManager.ts --excludePrivate false --excludeProtected false --excludeExternals false",
-    "docs:watch": "typedoc --out docs src/ShadowMapManager.ts --watch --excludePrivate false --excludeProtected false --excludeExternals false"
+    "docs:watch": "typedoc --out docs src/ShadowMapManager.ts --watch --excludePrivate false --excludeProtected false --excludeExternals false",
+    "copy-types": "rimraf ../../rendera-types && mkdir ../../rendera-types && copyfiles -u 1 \"../modules/*.d.ts\" \"../modules/*.d.ts.map\" ../../rendera-types/ && node ../../create-types-package.js"
   },
   "keywords": [],
   "author": "",
