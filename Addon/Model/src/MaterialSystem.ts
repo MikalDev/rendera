@@ -42,9 +42,13 @@ export class MaterialSystem {
 
     private applyMaterial(material: MaterialData, shader: WebGLProgram): void {
         // First, unbind all possible texture units that might be used
+        // Clear all texture types to prevent conflicts with C3's existing bindings
         for (const unit of Object.values(this.samplerTextureUnitMap)) {
             this.gl.activeTexture(this.gl.TEXTURE0 + unit);
             this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
+            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
+            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
         }
 
         // Then bind textures to their fixed texture units based on sampler names

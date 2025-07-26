@@ -784,6 +784,11 @@ export class GPUResourceManager implements IGPUResourceManager {
         if (enabled && shadowMap && lightViewProjection) {
             // Use texture unit 10 for shadow map
             this.gl.activeTexture(this.gl.TEXTURE10);  // Changed from TEXTURE7
+            // Clear any existing texture bindings to prevent type conflicts with C3
+            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
+            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
+            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
             this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
             const shadowMapLoc = this.gl.getUniformLocation(shader, 'u_ShadowMap');
             if (shadowMapLoc) {
@@ -852,6 +857,11 @@ export class GPUResourceManager implements IGPUResourceManager {
                 // Bind shadow map texture
                 const textureUnit = this.gl.TEXTURE10 + shadowMapIndex;
                 this.gl.activeTexture(textureUnit);
+                // Clear any existing texture bindings to prevent type conflicts with C3
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+                this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
+                this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
+                this.gl.bindTexture(this.gl.TEXTURE_3D, null);
                 this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
                 
                 if (GPUResourceManager.DEBUG_SHADOWS) {

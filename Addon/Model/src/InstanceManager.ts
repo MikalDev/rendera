@@ -25,6 +25,7 @@ export class InstanceManager implements IInstanceManager {
     
     private nextInstanceId = 1;
     private dirtyInstances: Set<number> = new Set();
+    private lastRenderTick = -1;
 
     private _animationController: AnimationController;
 
@@ -184,7 +185,14 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    render(viewProjection: { view: mat4, projection: mat4 }): void {
+    render(viewProjection: { view: mat4, projection: mat4 }, tick?: number): void {
+        // Skip rendering if already rendered this tick
+        if (tick !== undefined && tick === this.lastRenderTick) {
+            return;
+        }
+        if (tick !== undefined) {
+            this.lastRenderTick = tick;
+        }
         // Render each model group
         // @ts-ignore
         let renderer: WebGLRenderer;

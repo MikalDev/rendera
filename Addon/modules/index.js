@@ -13719,9 +13719,13 @@ class MaterialSystem {
     }
     applyMaterial(material, shader) {
         // First, unbind all possible texture units that might be used
+        // Clear all texture types to prevent conflicts with C3's existing bindings
         for (const unit of Object.values(this.samplerTextureUnitMap)) {
             this.gl.activeTexture(this.gl.TEXTURE0 + unit);
             this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
+            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
+            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
         }
         // Then bind textures to their fixed texture units based on sampler names
         material.textures.forEach((texture, samplerName) => {
@@ -14265,11 +14269,24 @@ class GPUResourceCache {
         const shaderProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
         // Get current element array buffer
         const elementArrayBuffer = this.gl.getParameter(this.gl.ELEMENT_ARRAY_BUFFER_BINDING);
+        // Get active texture unit
+        const activeTexture = this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+        // Get array buffer binding
+        const arrayBuffer = this.gl.getParameter(this.gl.ARRAY_BUFFER_BINDING);
+        // Get uniform buffer bindings for tracked binding points
+        const uniformBufferBindings = [];
+        for (const bindingPoint of GPUResourceCache.TRACKED_UBO_BINDING_POINTS) {
+            const buffer = this.gl.getIndexedParameter(this.gl.UNIFORM_BUFFER_BINDING, bindingPoint);
+            uniformBufferBindings.push(buffer);
+        }
         this.cachedState = {
             vao,
             textureBinding,
             shaderProgram,
-            elementArrayBuffer
+            elementArrayBuffer,
+            activeTexture,
+            arrayBuffer,
+            uniformBufferBindings
         };
         //console.log('[rendera] GPUResourceCache: cachedState', this.cachedState);
     }
@@ -14277,13 +14294,52 @@ class GPUResourceCache {
         // console.log('[rendera] GPUResourceCache: restoreModelMode');
         if (this.cachedState) {
             // console.log('[rendera] GPUResourceCache: restoreModelMode', this.cachedState);
+            // First, clean up any texture bindings we might have created on units 1-17
+            // This ensures C3 doesn't encounter unexpected textures
+            this.cleanupTextureUnits();
+            // Restore active texture unit first (before binding textures)
+            this.gl.activeTexture(this.cachedState.activeTexture);
+            // Restore original 4 states
             this.gl.bindVertexArray(this.cachedState.vao);
             this.gl.bindTexture(this.gl.TEXTURE_2D, this.cachedState.textureBinding);
             this.gl.useProgram(this.cachedState.shaderProgram);
             this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.cachedState.elementArrayBuffer);
+            // Restore additional states
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.cachedState.arrayBuffer);
+            // Restore uniform buffer bindings
+            for (let i = 0; i < this.cachedState.uniformBufferBindings.length; i++) {
+                const bindingPoint = GPUResourceCache.TRACKED_UBO_BINDING_POINTS[i];
+                const buffer = this.cachedState.uniformBufferBindings[i];
+                if (buffer !== undefined) {
+                    this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, bindingPoint, buffer);
+                }
+            }
+            // Clear cached state after restoration
+            this.cachedState = null;
         }
     }
+    /**
+     * Clean up texture bindings on units we use (1-17) to avoid conflicts with C3
+     * We skip unit 0 as it will be restored from cached state
+     */
+    cleanupTextureUnits() {
+        const currentActiveTexture = this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+        // Clean material texture units (1-4)
+        for (let unit = 1; unit <= 4; unit++) {
+            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+        }
+        // Clean shadow map texture units (10-17)
+        for (let unit = 10; unit <= 17; unit++) {
+            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+        }
+        // Restore the active texture unit
+        this.gl.activeTexture(currentActiveTexture);
+    }
 }
+// Track which UBO binding points we care about
+GPUResourceCache.TRACKED_UBO_BINDING_POINTS = [0, 1, 2, 3]; // Track first 4 binding points
 
 class GPUResourceManager {
     constructor(gl) {
@@ -14971,6 +15027,11 @@ class GPUResourceManager {
         if (enabled && shadowMap && lightViewProjection) {
             // Use texture unit 10 for shadow map
             this.gl.activeTexture(this.gl.TEXTURE10); // Changed from TEXTURE7
+            // Clear any existing texture bindings to prevent type conflicts with C3
+            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
+            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
+            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
             this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
             const shadowMapLoc = this.gl.getUniformLocation(shader, 'u_ShadowMap');
             if (shadowMapLoc) {
@@ -15024,6 +15085,11 @@ class GPUResourceManager {
                 // Bind shadow map texture
                 const textureUnit = this.gl.TEXTURE10 + shadowMapIndex;
                 this.gl.activeTexture(textureUnit);
+                // Clear any existing texture bindings to prevent type conflicts with C3
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+                this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
+                this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
+                this.gl.bindTexture(this.gl.TEXTURE_3D, null);
                 this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
                 if (GPUResourceManager.DEBUG_SHADOWS) {
                     const lightId = shadowMapManager.getShadowMapLightId(shadowMapIndex);
@@ -16497,6 +16563,7 @@ class InstanceManager {
         this.instanceBuffers = new Map();
         this.nextInstanceId = 1;
         this.dirtyInstances = new Set();
+        this.lastRenderTick = -1;
         this.gl = gl;
         this.modelLoader = modelLoader;
         this._animationController = new AnimationController(modelLoader);
@@ -16614,7 +16681,14 @@ class InstanceManager {
             this.updateWorldMatrix(instance);
         }
     }
-    render(viewProjection) {
+    render(viewProjection, tick) {
+        // Skip rendering if already rendered this tick
+        if (tick !== undefined && tick === this.lastRenderTick) {
+            return;
+        }
+        if (tick !== undefined) {
+            this.lastRenderTick = tick;
+        }
         // Render each model group
         // @ts-ignore
         let renderer;

@@ -27,7 +27,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		this._setTicking(true);
 
 		// @ts-ignore globalThis not typed
-		globalThis.mikalRendera = this
+		globalThis.rendera = this
 	}
 
 	_release() {
@@ -65,7 +65,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		const view = renderer._matMV
 		const projection = renderer._matP
 		viewProjection = {view, projection}
-		this.instanceManager.render(viewProjection);
+		this.instanceManager.render(viewProjection, this._currentTick);
 	}
 
 	_getViewProjectionMatrices(): {viewMatrix: typeof mat4, projectionMatrix: typeof mat4} {

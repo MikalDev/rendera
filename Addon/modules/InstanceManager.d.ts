@@ -16,6 +16,7 @@ export declare class InstanceManager implements IInstanceManager {
     private instanceBuffers;
     private nextInstanceId;
     private dirtyInstances;
+    private lastRenderTick;
     private _animationController;
     constructor(gl: WebGL2RenderingContext, modelLoader: ModelLoader, gpuResources: IGPUResourceManager);
     initialize(): void;
@@ -32,7 +33,7 @@ export declare class InstanceManager implements IInstanceManager {
     render(viewProjection: {
         view: mat4;
         projection: mat4;
-    }): void;
+    }, tick?: number): void;
     setModelPosition(x: number, y: number, z: number, instance: Model): void;
     setModelRotation(quaternion: Float32Array, instance: Model): void;
     setModelScale(x: number, y: number, z: number, instance: Model): void;
