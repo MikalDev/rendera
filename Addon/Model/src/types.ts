@@ -126,6 +126,8 @@ export interface InstanceData {
         useNormalMap?: boolean;
         lightPosition?: [number, number, number];
     };
+    disabledNodes: Set<string>;
+    allNodesDisabled: boolean;
 }
 
 // Main class interfaces
@@ -158,6 +160,11 @@ export interface IInstanceManager {
         instanceGroup: Set<number>,
         viewProjection: { view: mat4, projection: mat4 }
     ): void;
+    enableAllModelNodes(instance: Model): void;
+    disableAllModelNodes(instance: Model): void;
+    enableModelNode(nodeName: string, instance: Model): void;
+    disableModelNode(nodeName: string, instance: Model): void;
+    isModelNodeEnabled(nodeName: string, instance: Model): boolean;
 }
 
 export interface IModel {
@@ -170,7 +177,11 @@ export interface IModel {
     setNormalMapEnabled(enabled: boolean): void;
     setBindPose(): void;
     updateAnimation(deltaTime: number): void;
-    stopAnimation(): void;
+    enableAllNodes(): void;
+    disableAllNodes(): void;
+    enableNode(nodeName: string): void;
+    disableNode(nodeName: string): void;
+    isNodeEnabled(nodeName: string): boolean;
 }
 
 export enum TextureType {
@@ -193,9 +204,11 @@ export interface ModelData {
         node: ExtendedNode;
         modelMesh: ModelMesh;
         useSkinning: boolean;
+        nodeName?: string;
     }[];
     materialSystem: MaterialSystem;
     nodeArray?: Node[];
+    nodeNameMap: Map<string, ExtendedNode>;
 }
 
 export interface JointData {

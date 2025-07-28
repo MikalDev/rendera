@@ -13900,7 +13900,8 @@ class ModelLoader {
             rootNode: document.getRoot().listScenes()[0].listChildren()[0],
             scene: document.getRoot().listScenes()[0],
             renderableNodes: [],
-            materialSystem: new MaterialSystem(this.gl, SAMPLER_TEXTURE_UNIT_MAP)
+            materialSystem: new MaterialSystem(this.gl, SAMPLER_TEXTURE_UNIT_MAP),
+            nodeNameMap: new Map()
         };
         /*
         await Promise.all([
@@ -13945,6 +13946,11 @@ class ModelLoader {
             };
             // Attach the data to the node
             node.indexData = indexData;
+            // Add to node name map if the node has a name
+            const nodeName = node.getName();
+            if (nodeName) {
+                modelData.nodeNameMap.set(nodeName, node);
+            }
             const mesh = node.getMesh();
             if (mesh) {
                 const modelMesh = this.processMesh(mesh, document);
@@ -13952,6 +13958,7 @@ class ModelLoader {
                     node: node,
                     modelMesh,
                     useSkinning: !!node.getSkin(),
+                    nodeName: nodeName || undefined
                 });
             }
         });
@@ -15301,6 +15308,41 @@ class Model {
         const quat = new Float32Array([x, y, z, w]);
         this._manager.setModelRotation(quat, this);
     }
+    /**
+     * Enables all nodes in this model instance for rendering.
+     */
+    enableAllNodes() {
+        this._manager.enableAllModelNodes(this);
+    }
+    /**
+     * Disables all nodes in this model instance from rendering.
+     * This is more efficient than disabling nodes individually.
+     */
+    disableAllNodes() {
+        this._manager.disableAllModelNodes(this);
+    }
+    /**
+     * Enables a specific node by name for rendering.
+     * @param nodeName The name of the node to enable. For unnamed nodes, use 'node_<index>'.
+     */
+    enableNode(nodeName) {
+        this._manager.enableModelNode(nodeName, this);
+    }
+    /**
+     * Disables a specific node by name from rendering.
+     * @param nodeName The name of the node to disable. For unnamed nodes, use 'node_<index>'.
+     */
+    disableNode(nodeName) {
+        this._manager.disableModelNode(nodeName, this);
+    }
+    /**
+     * Checks if a specific node is enabled for rendering.
+     * @param nodeName The name of the node to check. For unnamed nodes, use 'node_<index>'.
+     * @returns True if the node is enabled, false if disabled.
+     */
+    isNodeEnabled(nodeName) {
+        return this._manager.isModelNodeEnabled(nodeName, this);
+    }
     get manager() {
         return this._manager;
     }
@@ -16633,7 +16675,9 @@ class InstanceManager {
                 animationNodeTransforms: new Map(),
                 boneMatrices: new Map()
             },
-            worldMatrix: new Float32Array(16) // 4x4 matrix
+            worldMatrix: new Float32Array(16), // 4x4 matrix
+            disabledNodes: new Set(),
+            allNodesDisabled: false
         };
         // Store instance
         this.instances.set(instanceId.id, instanceData);
@@ -16800,6 +16844,15 @@ class InstanceManager {
             this.updateWorldMatrix(instance);
             // For each mesh in the model
             for (const renderableNode of modelData.renderableNodes) {
+                // Check if this node is disabled for this instance
+                if (instance.allNodesDisabled) {
+                    continue; // Skip all nodes
+                }
+                const nodeName = renderableNode.nodeName;
+                const nodeIdentifier = nodeName || `node_${renderableNode.node.indexData.nodeIndex}`;
+                if (instance.disabledNodes.has(nodeIdentifier)) {
+                    continue; // Skip rendering this node
+                }
                 const mesh = renderableNode.modelMesh;
                 for (const primitive of mesh.primitives) {
                     // const material = modelData.materials[primitive.material];
@@ -16883,6 +16936,15 @@ class InstanceManager {
             this.updateWorldMatrix(instance);
             // For each mesh in the model
             for (const renderableNode of modelData.renderableNodes) {
+                // Check if this node is disabled for this instance
+                if (instance.allNodesDisabled) {
+                    continue; // Skip all nodes
+                }
+                const nodeName = renderableNode.nodeName;
+                const nodeIdentifier = nodeName || `node_${renderableNode.node.indexData.nodeIndex}`;
+                if (instance.disabledNodes.has(nodeIdentifier)) {
+                    continue; // Skip rendering this node
+                }
                 const mesh = renderableNode.modelMesh;
                 for (const primitive of mesh.primitives) {
                     // 1. Bind VAO
@@ -16966,6 +17028,66 @@ class InstanceManager {
     }
     setDebugShadowMap(enabled) {
         this.debugShadowMap = enabled;
+    }
+    enableAllModelNodes(instance) {
+        const instanceData = this.instances.get(instance.instanceId.id);
+        if (instanceData) {
+            instanceData.disabledNodes.clear();
+            instanceData.allNodesDisabled = false;
+        }
+    }
+    disableAllModelNodes(instance) {
+        const instanceData = this.instances.get(instance.instanceId.id);
+        if (instanceData) {
+            instanceData.allNodesDisabled = true;
+            // Clear individual disabled nodes since all are disabled
+            instanceData.disabledNodes.clear();
+        }
+    }
+    enableModelNode(nodeName, instance) {
+        const instanceData = this.instances.get(instance.instanceId.id);
+        if (instanceData) {
+            // If all nodes were disabled, we need to disable all except this one
+            if (instanceData.allNodesDisabled) {
+                instanceData.allNodesDisabled = false;
+                const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
+                if (modelData && modelData.nodeNameMap) {
+                    // Disable all nodes except the one being enabled
+                    for (const name of modelData.nodeNameMap.keys()) {
+                        if (name !== nodeName) {
+                            instanceData.disabledNodes.add(name);
+                        }
+                    }
+                }
+            }
+            else {
+                instanceData.disabledNodes.delete(nodeName);
+            }
+        }
+    }
+    disableModelNode(nodeName, instance) {
+        const instanceData = this.instances.get(instance.instanceId.id);
+        if (instanceData) {
+            const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
+            if ((modelData === null || modelData === void 0 ? void 0 : modelData.nodeNameMap) && !modelData.nodeNameMap.has(nodeName)) {
+                console.warn(`[InstanceManager] Node '${nodeName}' not found in model '${instance.instanceId.modelId}'`);
+            }
+            if (instanceData.allNodesDisabled) {
+                // All nodes are already disabled, nothing to do
+                return;
+            }
+            instanceData.disabledNodes.add(nodeName);
+        }
+    }
+    isModelNodeEnabled(nodeName, instance) {
+        const instanceData = this.instances.get(instance.instanceId.id);
+        if (instanceData) {
+            if (instanceData.allNodesDisabled) {
+                return false;
+            }
+            return !instanceData.disabledNodes.has(nodeName);
+        }
+        return true; // Default to enabled if instance not found
     }
     get animationController() {
         return this._animationController;

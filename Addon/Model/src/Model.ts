@@ -50,6 +50,46 @@ export class Model implements IModel {
         );
     }
 
+    /**
+     * Enables all nodes in this model instance for rendering.
+     */
+    public enableAllNodes(): void {
+        this._manager.enableAllModelNodes(this);
+    }
+
+    /**
+     * Disables all nodes in this model instance from rendering.
+     * This is more efficient than disabling nodes individually.
+     */
+    public disableAllNodes(): void {
+        this._manager.disableAllModelNodes(this);
+    }
+
+    /**
+     * Enables a specific node by name for rendering.
+     * @param nodeName The name of the node to enable. For unnamed nodes, use 'node_<index>'.
+     */
+    public enableNode(nodeName: string): void {
+        this._manager.enableModelNode(nodeName, this);
+    }
+
+    /**
+     * Disables a specific node by name from rendering.
+     * @param nodeName The name of the node to disable. For unnamed nodes, use 'node_<index>'.
+     */
+    public disableNode(nodeName: string): void {
+        this._manager.disableModelNode(nodeName, this);
+    }
+
+    /**
+     * Checks if a specific node is enabled for rendering.
+     * @param nodeName The name of the node to check. For unnamed nodes, use 'node_<index>'.
+     * @returns True if the node is enabled, false if disabled.
+     */
+    public isNodeEnabled(nodeName: string): boolean {
+        return this._manager.isModelNodeEnabled(nodeName, this);
+    }
+
     get manager(): IInstanceManager {
         return this._manager;
     }

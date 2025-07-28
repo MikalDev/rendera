@@ -129,7 +129,8 @@ export class ModelLoader implements IModelLoader {
             rootNode: document.getRoot().listScenes()[0].listChildren()[0],
             scene: document.getRoot().listScenes()[0],
             renderableNodes: [],
-            materialSystem: new MaterialSystem(this.gl, SAMPLER_TEXTURE_UNIT_MAP)
+            materialSystem: new MaterialSystem(this.gl, SAMPLER_TEXTURE_UNIT_MAP),
+            nodeNameMap: new Map<string, ExtendedNode>()
         };
 
         /*
@@ -183,6 +184,12 @@ export class ModelLoader implements IModelLoader {
             // Attach the data to the node
             (node as ExtendedNode).indexData = indexData;
 
+            // Add to node name map if the node has a name
+            const nodeName = node.getName();
+            if (nodeName) {
+                modelData.nodeNameMap.set(nodeName, node as ExtendedNode);
+            }
+
             const mesh = node.getMesh();
             if (mesh) {
                 const modelMesh = this.processMesh(mesh, document);
@@ -190,6 +197,7 @@ export class ModelLoader implements IModelLoader {
                     node: node as ExtendedNode,
                     modelMesh,
                     useSkinning: !!node.getSkin(),
+                    nodeName: nodeName || undefined
                 });
             }
         });

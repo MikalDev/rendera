@@ -85,3 +85,20 @@ The shadow mapping system (`Addon/Model/src/rendering/ShadowMapManager.ts`) supp
 Follow the branch naming convention: `<type>/<ticket-id>/<description>`
 - Types: feature, bugfix, hotfix, release, docs, test, chore, refactor
 - Example: `feature/shadow-map`
+
+## Design Principles
+
+Follow these design patterns when contributing to the codebase:
+
+- **DRY (Don't Repeat Yourself)**: Extract common functionality into reusable functions or classes. If you find yourself copying code, create a shared utility instead.
+
+- **YAGNI (You Aren't Gonna Need It)**: Only implement features that are currently needed. Avoid adding speculative functionality that might be useful "someday."
+
+- **SOLID**: 
+  - Single Responsibility: Each class/function should have one reason to change
+  - Open/Closed: Classes should be open for extension but closed for modification
+  - Liskov Substitution: Derived classes must be substitutable for their base classes
+  - Interface Segregation: Many specific interfaces are better than one general interface
+  - Dependency Inversion: Depend on abstractions, not concrete implementations
+
+- **KISS (Keep It Simple, Stupid)**: Prefer simple, readable solutions over clever or complex ones. Code should be easy to understand and maintain.

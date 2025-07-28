@@ -58,6 +58,11 @@ export declare class InstanceManager implements IInstanceManager {
     private cleanupInstance;
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
     setDebugShadowMap(enabled: boolean): void;
+    enableAllModelNodes(instance: Model): void;
+    disableAllModelNodes(instance: Model): void;
+    enableModelNode(nodeName: string, instance: Model): void;
+    disableModelNode(nodeName: string, instance: Model): void;
+    isModelNodeEnabled(nodeName: string, instance: Model): boolean;
     get animationController(): AnimationController;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map
