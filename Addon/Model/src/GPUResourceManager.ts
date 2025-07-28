@@ -358,7 +358,7 @@ export class GPUResourceManager implements IGPUResourceManager {
         uniform sampler2D u_MetallicRoughnessSampler;
         uniform sampler2D u_OcclusionSampler;
         uniform sampler2D u_EmissiveSampler;
-        uniform sampler2DShadow u_ShadowMaps[MAX_SHADOW_MAPS];  // Shadow map texture array
+        uniform sampler2D u_ShadowMaps[MAX_SHADOW_MAPS];  // Changed from sampler2DShadow to avoid type conflicts
         uniform bool u_UseNormalMap;
         uniform bool u_UseShadowMap;
         uniform bool u_ShadowEnabled[MAX_SHADOW_MAPS];  // Which shadow maps are active
@@ -515,35 +515,13 @@ export class GPUResourceManager implements IGPUResourceManager {
             }
             float currentDepth = projCoords.z - bias;
             
-            // Simplified shadow sampling - single sample per shadow map for debugging
+            // DEBUG: Only use first shadow map for testing
             float shadow = 0.0;
             
-            // DEBUG: Color code based on which shadow map we're sampling
-            // This will help us see which shadow map is being used
             if (shadowMapIndex == 0) {
-                shadow = texture(u_ShadowMaps[0], vec3(projCoords.xy, currentDepth));
-                // DEBUG: Tint red if using shadow map 0
-                //gl_FragColor.r += 0.1;
-            } else if (shadowMapIndex == 1) {
-                shadow = texture(u_ShadowMaps[1], vec3(projCoords.xy, currentDepth));
-                // DEBUG: Tint green if using shadow map 1
-                //gl_FragColor.g += 0.1;
-            } else if (shadowMapIndex == 2) {
-                shadow = texture(u_ShadowMaps[2], vec3(projCoords.xy, currentDepth));
-                // DEBUG: Tint blue if using shadow map 2
-                //gl_FragColor.b += 0.1;
-            } else if (shadowMapIndex == 3) {
-                shadow = texture(u_ShadowMaps[3], vec3(projCoords.xy, currentDepth));
-                // DEBUG: Tint yellow if using shadow map 3
-                //gl_FragColor.rg += vec2(0.1);
-            } else if (shadowMapIndex == 4) {
-                shadow = texture(u_ShadowMaps[4], vec3(projCoords.xy, currentDepth));
-            } else if (shadowMapIndex == 5) {
-                shadow = texture(u_ShadowMaps[5], vec3(projCoords.xy, currentDepth));
-            } else if (shadowMapIndex == 6) {
-                shadow = texture(u_ShadowMaps[6], vec3(projCoords.xy, currentDepth));
-            } else if (shadowMapIndex == 7) {
-                shadow = texture(u_ShadowMaps[7], vec3(projCoords.xy, currentDepth));
+                // Manual depth comparison since we're using sampler2D instead of sampler2DShadow
+                float depth = texture(u_ShadowMaps[0], projCoords.xy).r;
+                shadow = currentDepth > depth ? 0.0 : 1.0;
             }
             
             // Old PCF code commented out for debugging
@@ -589,13 +567,14 @@ export class GPUResourceManager implements IGPUResourceManager {
             for(int i = 0; i < MAX_LIGHTS; i++) {
                 vec3 lightContrib = calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
                 
-                // Apply shadow for this light if it casts shadows
-                float shadow = 1.0; // Default to no shadow
+                // DISABLED: Shadow maps temporarily disabled
+                float shadow = 1.0; // Always fully lit (no shadows)
+                /*
                 int shadowMapIndex = u_LightToShadowMap[i];
                 if (shadowMapIndex >= 0 && shadowMapIndex < MAX_SHADOW_MAPS) {
-                    // Use the current light for shadow calculation (light i corresponds to shadowMapIndex)
                     shadow = calculateShadowForMap(v_PositionsFromLight[shadowMapIndex], shadowMapIndex, u_Lights[i]);
                 }
+                */
                 
                 color += lightContrib * shadow;
             }
