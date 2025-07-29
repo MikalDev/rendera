@@ -13,6 +13,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	private _projectionMatrix: typeof mat4 = mat4.create();
 	private _lastTick = -1;
 	private _currentTick = -1;
+	private _lastLoadedModelPath: string = '';
 	
 	public initialized = false;
 
@@ -114,6 +115,16 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 
 	public getProjectionMatrix() {
 		return this._projectionMatrix;
+	}
+
+	public _triggerModelLoaded(modelPath: string) {
+		this._lastLoadedModelPath = modelPath;
+		// Trigger the onModelLoaded condition
+		this._trigger(this.Conditions.onModelLoaded);
+	}
+
+	public getLastLoadedModelPath() {
+		return this._lastLoadedModelPath;
 	}
 };
 

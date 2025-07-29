@@ -43,6 +43,9 @@ export default {
     typescript({
       tsconfig: './tsconfig.json',
       declarationDir: './dist',
+      compilerOptions: {
+        emitDeclarationOnly: true
+      }
     }),
     dtsReferencePlugin()
   ]

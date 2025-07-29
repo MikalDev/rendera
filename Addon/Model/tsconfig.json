@@ -13,8 +13,7 @@
     "typeRoots": ["./dist", "./node_modules/@types, ./src/draco"],
     "baseUrl": ".",
     "declarationDir": "./dist",
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
     "skipLibCheck": true
   },
   "include": ["src/**/*"],

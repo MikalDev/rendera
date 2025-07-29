@@ -262,6 +262,7 @@ export interface IGPUResourceManager {
     ): void;
     getShadowMapShader(): WebGLProgram;
     updateCameraPosition(position: [number, number, number]): void;
+    updateBoneUBO(boneMatrices: Float32Array, boneCount: number): void;
     gpuResourceCache: IGPUResourceCache;
     lights: Light[];
 }

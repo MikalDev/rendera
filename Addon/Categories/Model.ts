@@ -14,25 +14,63 @@ export default class ModelCategory {
         const modelId = this.modelLoader.generateModelId(path);
         if (this.modelLoader.hasModel(modelId)) {
             console.info('[rendera] Model already loaded', modelId, path);
+            // Trigger immediately if already loaded
+            this._triggerModelLoaded(path);
             return;
         }
-        const result = this.modelLoader.readDocument(path);
-        if (!result) {
-            console.error('[rendera] Model not found', modelId, path);
-            return;
-        }
-        console.info('[rendera] Model loaded', modelId, path);
+        
+        // Load model asynchronously
+        this.modelLoader.loadModel(path).then(() => {
+            console.info('[rendera] Model loaded', modelId, path);
+            // Trigger the onModelLoaded condition
+            this._triggerModelLoaded(path);
+        }).catch((error) => {
+            console.error('[rendera] Failed to load model', modelId, path, error);
+        });
     }
 
     /** @Conditions */
-    // @Condition('onCondition', 'On condition', 'On condition')
-    // onCondition() {
-    //     return false;
-    // }
+    @Condition('isModelLoaded', 'Is model loaded', 'Model {0} is loaded', 'Is model loaded?', {
+        params: [
+            addParam('modelPath', 'Model path', { type: Param.String })
+        ]
+    })
+    isModelLoaded(this: Instance, modelPath: string) {
+        const modelId = this.modelLoader.generateModelId(modelPath);
+        return this.modelLoader.hasModel(modelId);
+    }
+
+    @Condition('isModelLoading', 'Is model loading', 'Model {0} is loading', 'Is model currently loading?', {
+        params: [
+            addParam('modelPath', 'Model path', { type: Param.String })
+        ]
+    })
+    isModelLoading(this: Instance, modelPath: string) {
+        const modelId = this.modelLoader.generateModelId(modelPath);
+        return this.modelLoader.modelLoading(modelId);
+    }
+
+    @Condition('onModelLoaded', 'On model loaded', 'On model {0} loaded', 'Triggers when model finishes loading', {
+        isTrigger: true,
+        params: [
+            addParam('modelPath', 'Model path', { type: Param.String })
+        ]
+    })
+    onModelLoaded(this: Instance, modelPath: string) {
+        // For triggers with parameters, we need to check if this is the correct instance
+        // The trigger fires for all instances, but only returns true for matching paths
+        return this.getLastLoadedModelPath() === modelPath;
+    }
 
     /** @Expressions */
-    //@Expression('expression', 'Expression')
-    //Expression() {
-    //    return 'Value';
-    //}
+    @Expression('modelLoaded', 'Model loaded', 'Get model loaded status for {0}', {
+        params: [
+            addParam('modelPath', 'Model path', { type: Param.String })
+        ]
+    })
+    modelLoaded(this: Instance, modelPath: string) {
+        // Return 1 if loaded, 0 if not
+        const modelId = this.modelLoader.generateModelId(modelPath);
+        return this.modelLoader.hasModel(modelId) ? 1 : 0;
+    }
 }
