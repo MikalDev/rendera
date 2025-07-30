@@ -73,4 +73,19 @@ export default class ModelCategory {
         const modelId = this.modelLoader.generateModelId(modelPath);
         return this.modelLoader.hasModel(modelId) ? 1 : 0;
     }
+
+    @Action('setAnimationWorker', 'Set animation worker', 'Set animation worker to {0}', 'Enable/disable animation worker', {
+        params: [
+            addParam('enabled', 'Enabled', { type: Param.Boolean, initialValue: false })
+        ]
+    })
+    setAnimationWorker(this: Instance, enabled: boolean) {
+        console.log(`[Model Action] setAnimationWorker called with enabled=${enabled}`);
+        this.setUseAnimationWorker(enabled);
+    }
+
+    @Expression('animationWorkerEnabled', 'Animation worker enabled', 'Get animation worker status', {})
+    animationWorkerEnabled(this: Instance) {
+        return this.getUseAnimationWorker() ? 1 : 0;
+    }
 }

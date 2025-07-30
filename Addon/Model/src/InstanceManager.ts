@@ -604,6 +604,11 @@ export class InstanceManager implements IInstanceManager {
         this.debugShadowMap = enabled;
     }
 
+    public setUseAnimationWorker(enabled: boolean): void {
+        console.log(`[InstanceManager] setUseAnimationWorker called with enabled=${enabled}`);
+        this._animationController.setUseWorker(enabled);
+    }
+
     public enableAllModelNodes(instance: Model): void {
         const instanceData = this.instances.get(instance.instanceId.id);
         if (instanceData) {

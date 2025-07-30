@@ -11,8 +11,9 @@
     "build-dist": "rollup -c",
     "watch": "rollup -c -w",
     "copy": "copyfiles -u 1 \"dist/**/*\" ../modules",
-    "copy-gl-matrix": "copyfiles -u 1 src/gl-matrix.js ../modules/",
-    "build": "npm run build-clean && npm run build-clean-modules && npm run build-dist && npm run copy && npm run copy-gl-matrix",
+    "copy-gl-matrix": "copyfiles -u 1 src/gl-matrix.js src/gl-matrix-umd.js ../modules/",
+    "copy-workers": "copyfiles -u 1 \"dist/workers/**/*\" ../modules/",
+    "build": "npm run build-clean && npm run build-clean-modules && npm run build-dist && npm run copy && npm run copy-gl-matrix && npm run copy-workers",
     "docs": "typedoc --out docs src/ShadowMapManager.ts --excludePrivate false --excludeProtected false --excludeExternals false",
     "docs:watch": "typedoc --out docs src/ShadowMapManager.ts --watch --excludePrivate false --excludeProtected false --excludeExternals false",
     "copy-types": "rimraf ../../rendera-types && mkdir ../../rendera-types && copyfiles -u 1 \"../modules/*.d.ts\" \"../modules/*.d.ts.map\" ../../rendera-types/ && node ../../create-types-package.js"

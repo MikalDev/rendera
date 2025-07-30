@@ -2,7 +2,10 @@ import { ModelLoader } from './ModelLoader';
 import { InstanceData, AnimationOptions } from './types';
 export declare class AnimationController {
     private modelLoader;
+    private useWorker;
+    private workerManager;
     constructor(modelLoader: ModelLoader);
+    setUseWorker(enabled: boolean): void;
     private fastSceneTraverse;
     private updateNodeLocalTransforms;
     setBindPose(instance: InstanceData): void;
@@ -13,7 +16,10 @@ export declare class AnimationController {
     private updateTime;
     private updateNodeAnimationTransforms;
     private updateNodeSkinningMatrices;
-    private updateBoneMatrices;
+    private updateBoneMatricesAsync;
+    private updateBoneMatricesSync;
+    private updateBoneMatricesWorker;
+    private updateBoneMatricesMainThread;
     private mat4FromTypedArray;
     private findKeyframeIndices;
     private interpolateValues;

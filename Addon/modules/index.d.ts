@@ -1,6 +1,9 @@
 /// <reference path="./AnimationController.d.ts" />
 export * from './AnimationController';
 
+/// <reference path="./AnimationWorkerManager.d.ts" />
+export * from './AnimationWorkerManager';
+
 /// <reference path="./draco_decoder_gltf.d.ts" />
 export * from './draco_decoder_gltf';
 

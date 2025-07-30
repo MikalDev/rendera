@@ -58,6 +58,7 @@ export declare class InstanceManager implements IInstanceManager {
     private cleanupInstance;
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
     setDebugShadowMap(enabled: boolean): void;
+    setUseAnimationWorker(enabled: boolean): void;
     enableAllModelNodes(instance: Model): void;
     disableAllModelNodes(instance: Model): void;
     enableModelNode(nodeName: string, instance: Model): void;

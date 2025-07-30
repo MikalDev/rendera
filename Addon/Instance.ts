@@ -14,6 +14,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	private _lastTick = -1;
 	private _currentTick = -1;
 	private _lastLoadedModelPath: string = '';
+	private _useAnimationWorker: boolean = false; // Default to false for testing
 	
 	public initialized = false;
 
@@ -125,6 +126,23 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 
 	public getLastLoadedModelPath() {
 		return this._lastLoadedModelPath;
+	}
+
+	public setUseAnimationWorker(enabled: boolean): void {
+		console.log(`[rendera] setUseAnimationWorker called with enabled=${enabled}`);
+		this._useAnimationWorker = enabled;
+		// Update instance manager's animation controller
+		if (this.instanceManager) {
+			console.log('[rendera] Calling instanceManager.setUseAnimationWorker');
+			this.instanceManager.setUseAnimationWorker(enabled);
+		} else {
+			console.warn('[rendera] instanceManager is not initialized yet');
+		}
+		console.log(`[rendera] Animation worker ${enabled ? 'enabled' : 'disabled'}`);
+	}
+
+	public getUseAnimationWorker(): boolean {
+		return this._useAnimationWorker;
 	}
 };
 
