@@ -12,10 +12,11 @@ export default class LightsCategory {
                 addParam('z', 'Z Position', { type: Param.Number }),
                 addParam('color', 'Color', { type: Param.Number, initialValue: 0.0 }),
                 addParam('intensity', 'Intensity', { type: Param.Number, initialValue: 1.0 }),
-                addParam('attenuation', 'Attenuation', { type: Param.Number, initialValue: 0.0 })
+                addParam('attenuation', 'Attenuation', { type: Param.Number, initialValue: 0.0 }),
+                addParam('castShadow', 'Cast Shadow', { type: Param.Boolean, initialValue: false })
         ]
     })
-    setPointLight(this: Instance, lightNumber: number, x: number, y: number, z: number, color: number, intensity: number, attenuation: number) {
+    setPointLight(this: Instance, lightNumber: number, x: number, y: number, z: number, color: number, intensity: number, attenuation: number, castShadow: boolean) {
         // @ts-ignore
         const r = C3.GetRValue(color);
         // @ts-ignore
@@ -26,9 +27,10 @@ export default class LightsCategory {
             type: 'point',
             enabled: true,
             position: [x, y, z],
-            color: [r, g, b],  // Default to white light
+            color: [r, g, b],
             intensity: intensity,
-            attenuation: attenuation
+            attenuation: attenuation,
+            castShadows: castShadow
         });
     }
     @Action('setSpotLight', 'Set Spot Light', 'Set spot light at position {0},{1},{2}', 'Set spot light', {
@@ -67,7 +69,7 @@ export default class LightsCategory {
             color: [r, g, b],
             intensity: intensity,
             attenuation: attenuation,
-            castShadow: castShadow
+            castShadows: castShadow  // Fixed: changed from castShadow to castShadows
         });
     }
 

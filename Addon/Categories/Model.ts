@@ -50,6 +50,11 @@ export default class ModelCategory {
         return this.modelLoader.modelLoading(modelId);
     }
 
+    @Condition('isRenderaReady', 'Is Rendera ready', 'Rendera is ready', 'Check if Rendera is initialized and ready to load models', {})
+    isRenderaReady(this: Instance) {
+        return this.initialized;
+    }
+
     @Condition('onModelLoaded', 'On model loaded', 'On model {0} loaded', 'Triggers when model finishes loading', {
         isTrigger: true,
         params: [
@@ -60,6 +65,15 @@ export default class ModelCategory {
         // For triggers with parameters, we need to check if this is the correct instance
         // The trigger fires for all instances, but only returns true for matching paths
         return this.getLastLoadedModelPath() === modelPath;
+    }
+
+    @Condition('onRenderaReady', 'On Rendera ready', 'On Rendera ready', 'Triggers when Rendera is fully initialized and ready to load models', {
+        isTrigger: true
+    })
+    onRenderaReady(this: Instance) {
+        // This trigger fires once when Rendera is ready
+        // The instance will handle triggering this condition after initialization
+        return true;
     }
 
     /** @Expressions */

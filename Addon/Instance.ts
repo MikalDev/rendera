@@ -93,7 +93,17 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	}
 
 	async _tick() {
+		const wasInitialized = this.initialized;
 		if (!this.initialize()) return;
+		
+		// Trigger onRenderaReady on the first successful initialization during tick
+		if (!wasInitialized && this.initialized) {
+			// Use setTimeout to ensure the trigger happens after the runtime is ready
+			setTimeout(() => {
+				this._trigger(this.Conditions.onRenderaReady);
+				console.info('[rendera] Triggered onRenderaReady event during first tick');
+			}, 0);
+		}
 
 		// Get view and projection matrices
 		const {viewMatrix, projectionMatrix} = this._getViewProjectionMatrices();
