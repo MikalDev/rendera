@@ -609,6 +609,14 @@ export class InstanceManager implements IInstanceManager {
         this._animationController.setUseWorker(enabled);
     }
 
+    /**
+     * Gets the shadow map manager instance.
+     * @returns The shadow map manager
+     */
+    public getShadowMapManager(): ShadowMapManager {
+        return this.shadowMapManager;
+    }
+
     public enableAllModelNodes(instance: Model): void {
         const instanceData = this.instances.get(instance.instanceId.id);
         if (instanceData) {

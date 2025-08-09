@@ -9,6 +9,7 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     private buffers;
     private textures;
     private vaos;
+    private dummyShadowTexture;
     private readonly MAX_LIGHTS;
     lights: Light[];
     private dirtyLightParams;
@@ -63,6 +64,10 @@ export declare class GPUResourceManager implements IGPUResourceManager {
      * @param enabled - Whether to enable debug logging
      */
     static setDebugLogging(enabled: boolean): void;
+    /**
+     * Creates a dummy shadow texture for unused shadow map slots.
+     */
+    private createDummyShadowTexture;
     getShadowMapShader(): WebGLProgram;
 }
 export declare class ShaderSystem {

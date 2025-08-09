@@ -9,6 +9,9 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	public gpuResourceManager!: GPUResourceManager;
 	public instanceManager!: InstanceManager;
 	public modelLoader!: ModelLoader;
+	public get shadowMapManager() {
+		return this.instanceManager?.getShadowMapManager();
+	}
 	private _viewMatrix: typeof mat4 = mat4.create();
 	private _projectionMatrix: typeof mat4 = mat4.create();
 	private _lastTick = -1;

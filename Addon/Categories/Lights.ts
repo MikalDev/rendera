@@ -73,6 +73,23 @@ export default class LightsCategory {
         });
     }
 
+    @Action('setShadowMapResolution', 'Set Shadow Map Resolution', 'Set shadow map resolution to {0}', 'Set shadow map resolution', {
+        params: [
+            addParam('resolution', 'Resolution (128-4096, power of 2)', { type: Param.Number, initialValue: 1024 })
+        ]
+    })
+    setShadowMapResolution(this: Instance, resolution: number) {
+        // Clamp to valid power of 2 values
+        const validResolutions = [128, 256, 512, 1024, 2048, 4096];
+        const closestResolution = validResolutions.reduce((prev, curr) => 
+            Math.abs(curr - resolution) < Math.abs(prev - resolution) ? curr : prev
+        );
+        
+        if (this.shadowMapManager) {
+            this.shadowMapManager.setResolution(closestResolution);
+        }
+    }
+
     /** @Conditions */
     // @Condition('onCondition', 'On condition', 'On condition')
     // onCondition() {
@@ -80,8 +97,8 @@ export default class LightsCategory {
     // }
 
     /** @Expressions */
-    //@Expression('expression', 'Expression')
-    //Expression() {
-    //    return 'Value';
-    //}
+    @Expression('shadowMapResolution', 'Shadow Map Resolution')
+    shadowMapResolution(this: Instance) {
+        return this.shadowMapManager ? this.shadowMapManager.getResolution() : 1024;
+    }
 }

@@ -14354,6 +14354,8 @@ class GPUResourceManager {
         this.buffers = new Set();
         this.textures = new Set();
         this.vaos = new Set();
+        // Dummy shadow texture for unused shadow map slots
+        this.dummyShadowTexture = null;
         this.MAX_LIGHTS = 8;
         this.lights = new Array(8);
         this.dirtyLightParams = false;
@@ -14635,7 +14637,17 @@ class GPUResourceManager {
         uniform sampler2D u_MetallicRoughnessSampler;
         uniform sampler2D u_OcclusionSampler;
         uniform sampler2D u_EmissiveSampler;
-        uniform sampler2D u_ShadowMaps[MAX_SHADOW_MAPS];  // Changed from sampler2DShadow to avoid type conflicts
+        
+        // Individual shadow map samplers (WebGL doesn't support sampler2DShadow arrays)
+        uniform sampler2DShadow u_ShadowMap0;
+        uniform sampler2DShadow u_ShadowMap1;
+        uniform sampler2DShadow u_ShadowMap2;
+        uniform sampler2DShadow u_ShadowMap3;
+        uniform sampler2DShadow u_ShadowMap4;
+        uniform sampler2DShadow u_ShadowMap5;
+        uniform sampler2DShadow u_ShadowMap6;
+        uniform sampler2DShadow u_ShadowMap7;
+        
         uniform bool u_UseNormalMap;
         uniform bool u_UseShadowMap;
         uniform bool u_ShadowEnabled[MAX_SHADOW_MAPS];  // Which shadow maps are active
@@ -14792,34 +14804,26 @@ class GPUResourceManager {
             }
             float currentDepth = projCoords.z - bias;
             
-            // DEBUG: Only use first shadow map for testing
+            // Use individual shadow map uniforms with proper sampler2DShadow sampling
             float shadow = 0.0;
             
             if (shadowMapIndex == 0) {
-                // Manual depth comparison since we're using sampler2D instead of sampler2DShadow
-                float depth = texture(u_ShadowMaps[0], projCoords.xy).r;
-                shadow = currentDepth > depth ? 0.0 : 1.0;
-            }
-            
-            // Old PCF code commented out for debugging
-            /*
-            const int SAMPLE_RADIUS = 2;
-            const float SAMPLES = float((SAMPLE_RADIUS * 2 + 1) * (SAMPLE_RADIUS * 2 + 1));
-            
-            if (shadowMapIndex == 0) {
-                vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMaps[0], 0));
-                for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
-                    for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
-                        vec2 offset = vec2(float(x), float(y)) * texelSize;
-                        shadow += texture(u_ShadowMaps[0], vec3(projCoords.xy + offset, currentDepth));
-                    }
-                }
+                shadow = texture(u_ShadowMap0, vec3(projCoords.xy, currentDepth));
             } else if (shadowMapIndex == 1) {
-                vec2 texelSize = 1.0 / vec2(textureSize(u_ShadowMaps[1], 0));
-                for(int x = -SAMPLE_RADIUS; x <= SAMPLE_RADIUS; ++x) {
-                    for(int y = -SAMPLE_RADIUS; y <= SAMPLE_RADIUS; ++y) {
-                        vec2 offset = vec2(float(x), float(y)) * texelSize;
-            */
+                shadow = texture(u_ShadowMap1, vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 2) {
+                shadow = texture(u_ShadowMap2, vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 3) {
+                shadow = texture(u_ShadowMap3, vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 4) {
+                shadow = texture(u_ShadowMap4, vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 5) {
+                shadow = texture(u_ShadowMap5, vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 6) {
+                shadow = texture(u_ShadowMap6, vec3(projCoords.xy, currentDepth));
+            } else if (shadowMapIndex == 7) {
+                shadow = texture(u_ShadowMap7, vec3(projCoords.xy, currentDepth));
+            }
             
             return shadow;
         }
@@ -14844,14 +14848,12 @@ class GPUResourceManager {
             for(int i = 0; i < MAX_LIGHTS; i++) {
                 vec3 lightContrib = calculateLightContribution(u_Lights[i], N, V, baseColor, metallic, roughness);
                 
-                // DISABLED: Shadow maps temporarily disabled
-                float shadow = 1.0; // Always fully lit (no shadows)
-                /*
+                // Calculate shadows for lights that cast them
+                float shadow = 1.0;
                 int shadowMapIndex = u_LightToShadowMap[i];
                 if (shadowMapIndex >= 0 && shadowMapIndex < MAX_SHADOW_MAPS) {
                     shadow = calculateShadowForMap(v_PositionsFromLight[shadowMapIndex], shadowMapIndex, u_Lights[i]);
                 }
-                */
                 
                 color += lightContrib * shadow;
             }
@@ -15056,32 +15058,17 @@ class GPUResourceManager {
         if (biasLoc) {
             this.gl.uniform1f(biasLoc, bias);
         }
-        if (!shadowsEnabled) {
-            return; // No shadows to set up
-        }
+        // All sampler2DShadow uniforms need valid textures
+        const dummyTexture = this.createDummyShadowTexture();
         // Initialize shadow enabled array (all false)
         const shadowEnabledArray = new Array(8).fill(0); // MAX_SHADOW_MAPS = 8
         const lightToShadowArray = new Array(8).fill(-1); // MAX_LIGHTS = 8, -1 = no shadow
         const viewProjectionMatrices = new Array(8);
-        // Populate arrays with active shadow maps
+        // First, collect data for active shadow maps
         for (const shadowMapIndex of activeShadowMapIndices) {
             shadowEnabledArray[shadowMapIndex] = 1;
             const shadowData = shadowMapManager.getShadowDataByIndex(shadowMapIndex);
             if (shadowData) {
-                // Bind shadow map texture
-                const textureUnit = this.gl.TEXTURE10 + shadowMapIndex;
-                this.gl.activeTexture(textureUnit);
-                // Clear any existing texture bindings to prevent type conflicts with C3
-                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
-                this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
-                this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
-                this.gl.bindTexture(this.gl.TEXTURE_3D, null);
-                this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
-                if (GPUResourceManager.DEBUG_SHADOWS) {
-                    const lightId = shadowMapManager.getShadowMapLightId(shadowMapIndex);
-                    const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
-                    console.log(`[GPUResourceManager] Binding texture ${shadowData.texture} to unit ${10 + shadowMapIndex} for shadow map ${shadowMapIndex} (light ${lightId}), current bound: ${currentTexture}`);
-                }
                 // Calculate combined view-projection matrix
                 const viewProjection = new Float32Array(16);
                 const combined = create$3();
@@ -15090,11 +15077,23 @@ class GPUResourceManager {
                 viewProjectionMatrices[shadowMapIndex] = viewProjection;
                 if (GPUResourceManager.DEBUG_SHADOWS) {
                     const lightId = shadowMapManager.getShadowMapLightId(shadowMapIndex);
-                    // Log first few elements of the matrix to see if they're different
                     const sample = `[${combined[0].toFixed(2)}, ${combined[1].toFixed(2)}, ${combined[12].toFixed(2)}, ${combined[13].toFixed(2)}]`;
                     console.log(`[GPUResourceManager] Shadow map ${shadowMapIndex} -> Light ${lightId}, VP matrix set, sample: ${sample}`);
                 }
             }
+        }
+        // Bind textures to all 8 texture units
+        // Every sampler2DShadow uniform must have a valid texture
+        for (let i = 0; i < 8; i++) {
+            this.gl.activeTexture(this.gl.TEXTURE10 + i);
+            // Get texture for this slot
+            const shadowData = activeShadowMapIndices.includes(i)
+                ? shadowMapManager.getShadowDataByIndex(i)
+                : null;
+            const textureToUse = (shadowData && shadowData.texture)
+                ? shadowData.texture
+                : dummyTexture;
+            this.gl.bindTexture(this.gl.TEXTURE_2D, textureToUse);
         }
         // Set light-to-shadow mapping
         for (const [lightId, shadowMapIndex] of lightToShadowMapping) {
@@ -15114,14 +15113,14 @@ class GPUResourceManager {
         if (lightToShadowMapLoc) {
             this.gl.uniform1iv(lightToShadowMapLoc, lightToShadowArray);
         }
-        // Set shadow map texture array
-        const shadowMapArrayLoc = this.gl.getUniformLocation(shader, 'u_ShadowMaps');
-        if (shadowMapArrayLoc) {
-            const textureUnits = new Array(8);
-            for (let i = 0; i < 8; i++) {
-                textureUnits[i] = 10 + i; // Texture units 10-17
+        // Set uniforms for all 8 shadow map slots
+        // Each uniform points to the corresponding texture unit (10+i)
+        for (let i = 0; i < 8; i++) {
+            const uniformName = `u_ShadowMap${i}`;
+            const location = this.gl.getUniformLocation(shader, uniformName);
+            if (location !== null) {
+                this.gl.uniform1i(location, 10 + i);
             }
-            this.gl.uniform1iv(shadowMapArrayLoc, textureUnits);
         }
         // Set light view-projection matrices array
         const lightViewProjectionsLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjections');
@@ -15148,6 +15147,32 @@ class GPUResourceManager {
     static setDebugLogging(enabled) {
         GPUResourceManager.DEBUG_SHADOWS = enabled;
         console.log(`[GPUResourceManager] Debug logging ${enabled ? 'enabled' : 'disabled'}`);
+    }
+    /**
+     * Creates a dummy shadow texture for unused shadow map slots.
+     */
+    createDummyShadowTexture() {
+        if (this.dummyShadowTexture) {
+            return this.dummyShadowTexture;
+        }
+        const texture = this.gl.createTexture();
+        if (!texture) {
+            throw this.createError(ModelErrorCode.GL_ERROR, 'Failed to create dummy shadow texture');
+        }
+        this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+        // Create a 4x4 depth texture (some drivers have issues with 1x1)
+        this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.DEPTH_COMPONENT24, 4, 4, 0, this.gl.DEPTH_COMPONENT, this.gl.UNSIGNED_INT, null);
+        // Set required parameters for sampler2DShadow
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_FUNC, this.gl.LEQUAL);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+        this.dummyShadowTexture = texture;
+        this.textures.add(texture);
+        return texture;
     }
     getShadowMapShader() {
         const vertexShader = `#version 300 es
@@ -15271,8 +15296,6 @@ class ShaderSystem {
         this.programs.forEach(program => this.gl.deleteProgram(program));
     }
 }
-// @ts-ignore
-globalThis.GPUResourceManager = GPUResourceManager;
 
 class Model {
     constructor(instanceId, manager) {
@@ -16627,6 +16650,13 @@ class ShadowMapManager {
         }
     }
     /**
+     * Gets the current shadow map resolution.
+     * @returns The current resolution in pixels
+     */
+    getResolution() {
+        return this.resolution;
+    }
+    /**
      * Removes shadow map resources for a specific light.
      * @param lightId - ID of the light whose shadow map should be removed
      */
@@ -17408,6 +17438,13 @@ class InstanceManager {
     setUseAnimationWorker(enabled) {
         console.log(`[InstanceManager] setUseAnimationWorker called with enabled=${enabled}`);
         this._animationController.setUseWorker(enabled);
+    }
+    /**
+     * Gets the shadow map manager instance.
+     * @returns The shadow map manager
+     */
+    getShadowMapManager() {
+        return this.shadowMapManager;
     }
     enableAllModelNodes(instance) {
         const instanceData = this.instances.get(instance.instanceId.id);

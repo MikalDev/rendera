@@ -734,6 +734,14 @@ export class ShadowMapManager {
     }
 
     /**
+     * Gets the current shadow map resolution.
+     * @returns The current resolution in pixels
+     */
+    getResolution(): number {
+        return this.resolution;
+    }
+
+    /**
      * Removes shadow map resources for a specific light.
      * @param lightId - ID of the light whose shadow map should be removed
      */
@@ -1084,4 +1092,4 @@ export class ShadowMapManager {
             lightId: lightId
         };
     }
-} 
+}

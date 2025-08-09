@@ -3,6 +3,7 @@ import { ModelLoader } from './ModelLoader';
 import { Model } from './Model';
 import { AnimationController } from './AnimationController';
 import { mat4 } from 'gl-matrix';
+import { ShadowMapManager } from './ShadowMapManager';
 export declare class InstanceManager implements IInstanceManager {
     private gpuResources;
     private gl;
@@ -59,6 +60,11 @@ export declare class InstanceManager implements IInstanceManager {
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
     setDebugShadowMap(enabled: boolean): void;
     setUseAnimationWorker(enabled: boolean): void;
+    /**
+     * Gets the shadow map manager instance.
+     * @returns The shadow map manager
+     */
+    getShadowMapManager(): ShadowMapManager;
     enableAllModelNodes(instance: Model): void;
     disableAllModelNodes(instance: Model): void;
     enableModelNode(nodeName: string, instance: Model): void;
