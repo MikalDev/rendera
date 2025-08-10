@@ -147,24 +147,23 @@ export interface IGPUResourceCache {
 }
 
 export interface IInstanceManager {
-    setModelPosition(x: number, y: number, z: number, instance: Model): void;
-    setModelRotation(quaternion: Float32Array, instance: Model): void;
-    setModelScale(x: number, y: number, z: number, instance: Model): void;
-    playModelAnimation(name: string, instance: Model, options?: AnimationOptions): void;
-    stopModelAnimation(instance: Model): void;
-    setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
+    // Essential methods that need manager access
     updateModelAnimation(instance: Model, deltaTime: number): void;
     setModelBindPose(instance: Model): void;
+    
+    // Helper methods for Model class
+    markInstanceDirty(instanceId: number): void;
+    invalidateAnimationCache(instanceId: number): void;
+    
+    // Complex node operations that need model data access
+    enableModelNode(nodeName: string, instance: Model): void;
+    
+    // Rendering (internal use)
     renderShadowMapInstances(
         modelId: string,
         instanceGroup: Set<number>,
         viewProjection: { view: mat4, projection: mat4 }
     ): void;
-    enableAllModelNodes(instance: Model): void;
-    disableAllModelNodes(instance: Model): void;
-    enableModelNode(nodeName: string, instance: Model): void;
-    disableModelNode(nodeName: string, instance: Model): void;
-    isModelNodeEnabled(nodeName: string, instance: Model): boolean;
 }
 
 export interface IModel {
@@ -174,6 +173,7 @@ export interface IModel {
     setScale(x: number, y: number, z: number): void;
     playAnimation(name: string, options?: AnimationOptions): void;
     stopAnimation(): void;
+    setAnimationSpeed(speed: number): void;
     setNormalMapEnabled(enabled: boolean): void;
     setBindPose(): void;
     updateAnimation(deltaTime: number): void;

@@ -1,4 +1,4 @@
-import { InstanceData, IInstanceManager, IGPUResourceManager, type AnimationOptions } from './types';
+import { InstanceData, IInstanceManager, IGPUResourceManager } from './types';
 import { ModelLoader } from './ModelLoader';
 import { Model } from './Model';
 import { AnimationController } from './AnimationController';
@@ -36,13 +36,10 @@ export declare class InstanceManager implements IInstanceManager {
         view: mat4;
         projection: mat4;
     }, tick?: number): void;
-    setModelPosition(x: number, y: number, z: number, instance: Model): void;
-    setModelRotation(quaternion: Float32Array, instance: Model): void;
-    setModelScale(x: number, y: number, z: number, instance: Model): void;
+    markInstanceDirty(instanceId: number): void;
+    invalidateAnimationCache(instanceId: number): void;
     setModelBindPose(instance: Model): void;
-    playModelAnimation(animationName: string, instance: Model, options?: AnimationOptions): void;
     updateModelAnimation(instance: Model, deltaTime: number): void;
-    stopModelAnimation(instance: Model): void;
     private createError;
     private addToModelGroup;
     private removeFromModelGroup;
@@ -58,7 +55,6 @@ export declare class InstanceManager implements IInstanceManager {
     }): void;
     private startAnimation;
     private cleanupInstance;
-    setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
     setDebugShadowMap(enabled: boolean): void;
     setUseAnimationWorker(enabled: boolean): void;
     private cacheModelInWorkerIfNeeded;
@@ -67,11 +63,7 @@ export declare class InstanceManager implements IInstanceManager {
      * @returns The shadow map manager
      */
     getShadowMapManager(): ShadowMapManager;
-    enableAllModelNodes(instance: Model): void;
-    disableAllModelNodes(instance: Model): void;
     enableModelNode(nodeName: string, instance: Model): void;
-    disableModelNode(nodeName: string, instance: Model): void;
-    isModelNodeEnabled(nodeName: string, instance: Model): boolean;
     get animationController(): AnimationController;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map

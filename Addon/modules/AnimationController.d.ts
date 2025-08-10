@@ -27,5 +27,6 @@ export declare class AnimationController {
     private interpolateValues;
     startAnimation(instance: InstanceData, animationName: string, options?: AnimationOptions): void;
     stopAnimation(instance: InstanceData): void;
+    invalidateCache(instanceId: number): void;
 }
 //# sourceMappingURL=AnimationController.d.ts.map

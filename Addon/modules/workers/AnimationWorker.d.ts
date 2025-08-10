@@ -44,6 +44,12 @@ interface ComputeAnimationResponse {
     animationMatrices: Float32Array;
     boneMatricesMap?: Map<number, Float32Array>;
 }
+interface AnimationChannel {
+    nodeIndex: number;
+    targetPath: 'translation' | 'rotation' | 'scale';
+    times: Float32Array;
+    values: Float32Array;
+}
 interface ModelCache {
     skins: Map<number, {
         inverseBindMatrices: Float32Array;

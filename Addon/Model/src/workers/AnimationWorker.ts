@@ -73,6 +73,14 @@ interface ComputeAnimationResponse {
     boneMatricesMap?: Map<number, Float32Array>;  // Optional map of nodeIndex -> boneMatrices
 }
 
+// Animation channel structure
+interface AnimationChannel {
+    nodeIndex: number;
+    targetPath: 'translation' | 'rotation' | 'scale';
+    times: Float32Array;
+    values: Float32Array;
+}
+
 // Model-specific caches
 interface ModelCache {
     skins: Map<number, {  // nodeIndex -> skin data

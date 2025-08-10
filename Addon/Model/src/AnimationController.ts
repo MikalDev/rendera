@@ -603,4 +603,9 @@ export class AnimationController {
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
     }
+
+    // Public method to invalidate cache for a specific instance
+    public invalidateCache(instanceId: number): void {
+        this.instanceCache.delete(instanceId);
+    }
 }

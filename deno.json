@@ -16,7 +16,8 @@
         "bp-build": "lost build",
         "bp-post": "deno run --allow-read --allow-write Tools/post-build.ts",
         "bp": "deno run --allow-run --allow-read --allow-write Tools/build-and-post.ts",
-        "update": "deno install --name lost jsr:@lost-c3/lib@3.3.5/cli --global -f -A"
+        "update": "deno install --name lost jsr:@lost-c3/lib@3.3.5/cli --global -f -A",
+        "types": "node Tools/create-types-package.js"
     },
     "imports": {
         "@Runtime/": "./Addon/",

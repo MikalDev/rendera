@@ -172,8 +172,8 @@ export class InstanceManager implements IInstanceManager {
         // Add to model group
         this.addToModelGroup(instanceId);
         
-        // Create Model interface
-        return new Model(instanceId, this);
+        // Create Model interface with direct instanceData reference
+        return new Model(instanceId, this, instanceData);
     }
 
     deleteModel(instanceId: number): void {
@@ -255,28 +255,15 @@ export class InstanceManager implements IInstanceManager {
         if (runtime) renderer.SetTexture(null);
     }
 
-    public setModelPosition(x: number, y: number, z: number, instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.transform.position.set([x, y, z]);
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
+    // Helper method for Model class to mark instance as dirty
+    public markInstanceDirty(instanceId: number): void {
+        this.dirtyInstances.add(instanceId);
     }
 
-    public setModelRotation(quaternion: Float32Array, instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.transform.rotation.set(quaternion);
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
-    }
-
-    public setModelScale(x: number, y: number, z: number, instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.transform.scale.set([x, y, z]);
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
+    // Helper method for Model class to invalidate animation cache
+    public invalidateAnimationCache(instanceId: number): void {
+        // Delegate to animation controller which manages the cache
+        this._animationController.invalidateCache(instanceId);
     }
 
     public setModelBindPose(instance: Model): void {
@@ -286,16 +273,7 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    public playModelAnimation(
-        animationName: string, 
-        instance: Model,
-        options?: AnimationOptions
-    ): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            this.startAnimation(instanceData, animationName, options);
-        }
-    }
+    // Removed - Model handles this directly
 
     public updateModelAnimation(instance: Model, deltaTime: number): void {
         const instanceData = this.instances.get(instance.instanceId.id);
@@ -304,12 +282,7 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    public stopModelAnimation(instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.animationState.currentAnimation = null;
-        }
-    }
+    // Removed - Model handles these directly
 
     private createError(code: ModelErrorCode, message: string): ModelError {
         return { name: 'ModelError', code, message };
@@ -600,13 +573,7 @@ export class InstanceManager implements IInstanceManager {
         this.dirtyInstances.delete(instanceId);
     }
 
-    public setModelNormalMapEnabled(enabled: boolean, instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.renderOptions.useNormalMap = enabled;
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
-    }
+    // Removed - Model handles this directly
 
     public setDebugShadowMap(enabled: boolean): void {
         this.debugShadowMap = enabled;
@@ -645,22 +612,7 @@ export class InstanceManager implements IInstanceManager {
         return this.shadowMapManager;
     }
 
-    public enableAllModelNodes(instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.disabledNodes.clear();
-            instanceData.allNodesDisabled = false;
-        }
-    }
-
-    public disableAllModelNodes(instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.allNodesDisabled = true;
-            // Clear individual disabled nodes since all are disabled
-            instanceData.disabledNodes.clear();
-        }
-    }
+    // Removed - Model handles these directly
 
     public enableModelNode(nodeName: string, instance: Model): void {
         const instanceData = this.instances.get(instance.instanceId.id);
@@ -683,32 +635,7 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    public disableModelNode(nodeName: string, instance: Model): void {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
-            if (modelData?.nodeNameMap && !modelData.nodeNameMap.has(nodeName)) {
-                console.warn(`[InstanceManager] Node '${nodeName}' not found in model '${instance.instanceId.modelId}'`);
-            }
-            
-            if (instanceData.allNodesDisabled) {
-                // All nodes are already disabled, nothing to do
-                return;
-            }
-            instanceData.disabledNodes.add(nodeName);
-        }
-    }
-
-    public isModelNodeEnabled(nodeName: string, instance: Model): boolean {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            if (instanceData.allNodesDisabled) {
-                return false;
-            }
-            return !instanceData.disabledNodes.has(nodeName);
-        }
-        return true; // Default to enabled if instance not found
-    }
+    // Removed - Model handles these directly
 
     get animationController(): AnimationController {
         return this._animationController;

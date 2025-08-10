@@ -15298,65 +15298,119 @@ class ShaderSystem {
 }
 
 class Model {
-    constructor(instanceId, manager) {
+    constructor(instanceId, manager, instanceData) {
         this.instanceId = instanceId;
         this._manager = manager;
+        this._instanceData = instanceData;
     }
-    setNormalMapEnabled(enabled) {
-        this._manager.setModelNormalMapEnabled(enabled, this);
+    // Getter/Setter for animation speed
+    get animationSpeed() {
+        return this._instanceData.animationState.speed;
     }
+    set animationSpeed(speed) {
+        // Clamp speed to reasonable values (0.1x to 10x)
+        this._instanceData.animationState.speed = Math.max(0.1, Math.min(10, speed));
+    }
+    // Getter/Setter for normal map
+    get normalMapEnabled() {
+        var _a;
+        return (_a = this._instanceData.renderOptions.useNormalMap) !== null && _a !== void 0 ? _a : false;
+    }
+    set normalMapEnabled(enabled) {
+        this._instanceData.renderOptions.useNormalMap = enabled;
+    }
+    // Direct property access methods
     setPosition(x, y, z) {
-        this._manager.setModelPosition(x, y, z, this);
+        this._instanceData.transform.position.set([x, y, z]);
+        this._manager.markInstanceDirty(this.instanceId.id);
     }
     setRotation(quaternion) {
-        this._manager.setModelRotation(quaternion, this);
+        this._instanceData.transform.rotation.set(quaternion);
+        this._manager.markInstanceDirty(this.instanceId.id);
     }
     setScale(x, y, z) {
-        this._manager.setModelScale(x, y, z, this);
+        this._instanceData.transform.scale.set([x, y, z]);
+        this._manager.markInstanceDirty(this.instanceId.id);
+    }
+    // Deprecated - use animationSpeed property instead
+    setAnimationSpeed(speed) {
+        this.animationSpeed = speed;
+    }
+    // Deprecated - use normalMapEnabled property instead
+    setNormalMapEnabled(enabled) {
+        this.normalMapEnabled = enabled;
     }
     playAnimation(animationName, options) {
-        this._manager.playModelAnimation(animationName, this, options);
+        var _a, _b;
+        this._instanceData.animationState.currentAnimation = animationName;
+        this._instanceData.animationState.currentTime = 0;
+        this._instanceData.animationState.playing = true;
+        if (options) {
+            this._instanceData.animationState.speed = (_a = options.speed) !== null && _a !== void 0 ? _a : 1;
+            this._instanceData.animationState.loop = (_b = options.loop) !== null && _b !== void 0 ? _b : true;
+        }
+        // Still need manager for animation controller access
+        this._manager.invalidateAnimationCache(this.instanceId.id);
     }
     updateAnimation(deltaTime) {
+        // Delegate to manager as it needs access to AnimationController
         this._manager.updateModelAnimation(this, deltaTime);
     }
     stopAnimation() {
-        this._manager.stopModelAnimation(this);
+        this._instanceData.animationState.currentAnimation = null;
+        this._instanceData.animationState.playing = false;
+        this._instanceData.animationState.currentTime = 0;
+        this._manager.invalidateAnimationCache(this.instanceId.id);
     }
     setBindPose() {
+        // Delegate to manager as it needs access to AnimationController
         this._manager.setModelBindPose(this);
     }
     // Additional convenience methods
     setQuaternion(x, y, z, w) {
         const quat = new Float32Array([x, y, z, w]);
-        this._manager.setModelRotation(quat, this);
+        this.setRotation(quat);
     }
     /**
      * Enables all nodes in this model instance for rendering.
      */
     enableAllNodes() {
-        this._manager.enableAllModelNodes(this);
+        this._instanceData.disabledNodes.clear();
+        this._instanceData.allNodesDisabled = false;
     }
     /**
      * Disables all nodes in this model instance from rendering.
      * This is more efficient than disabling nodes individually.
      */
     disableAllNodes() {
-        this._manager.disableAllModelNodes(this);
+        this._instanceData.allNodesDisabled = true;
+        this._instanceData.disabledNodes.clear();
     }
     /**
      * Enables a specific node by name for rendering.
      * @param nodeName The name of the node to enable. For unnamed nodes, use 'node_<index>'.
      */
     enableNode(nodeName) {
-        this._manager.enableModelNode(nodeName, this);
+        if (this._instanceData.allNodesDisabled) {
+            // If all nodes were disabled, we need to switch to individual mode
+            this._instanceData.allNodesDisabled = false;
+            // We'd need access to all node names to disable all except this one
+            // For now, delegate to manager for this complex case
+            this._manager.enableModelNode(nodeName, this);
+        }
+        else {
+            this._instanceData.disabledNodes.delete(nodeName);
+        }
     }
     /**
      * Disables a specific node by name from rendering.
      * @param nodeName The name of the node to disable. For unnamed nodes, use 'node_<index>'.
      */
     disableNode(nodeName) {
-        this._manager.disableModelNode(nodeName, this);
+        if (this._instanceData.allNodesDisabled) {
+            return; // Already all disabled
+        }
+        this._instanceData.disabledNodes.add(nodeName);
     }
     /**
      * Checks if a specific node is enabled for rendering.
@@ -15364,7 +15418,10 @@ class Model {
      * @returns True if the node is enabled, false if disabled.
      */
     isNodeEnabled(nodeName) {
-        return this._manager.isModelNodeEnabled(nodeName, this);
+        if (this._instanceData.allNodesDisabled) {
+            return false;
+        }
+        return !this._instanceData.disabledNodes.has(nodeName);
     }
     get manager() {
         return this._manager;
@@ -16144,6 +16201,10 @@ class AnimationController {
         instance.animationState.currentTime = 0;
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
+    }
+    // Public method to invalidate cache for a specific instance
+    invalidateCache(instanceId) {
+        this.instanceCache.delete(instanceId);
     }
 }
 
@@ -17168,8 +17229,8 @@ class InstanceManager {
         this.updateAnimation(instanceData, 0);
         // Add to model group
         this.addToModelGroup(instanceId);
-        // Create Model interface
-        return new Model(instanceId, this);
+        // Create Model interface with direct instanceData reference
+        return new Model(instanceId, this, instanceData);
     }
     deleteModel(instanceId) {
         this.cleanupInstance(instanceId);
@@ -17231,26 +17292,14 @@ class InstanceManager {
         if (runtime)
             renderer.SetTexture(null);
     }
-    setModelPosition(x, y, z, instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.transform.position.set([x, y, z]);
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
+    // Helper method for Model class to mark instance as dirty
+    markInstanceDirty(instanceId) {
+        this.dirtyInstances.add(instanceId);
     }
-    setModelRotation(quaternion, instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.transform.rotation.set(quaternion);
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
-    }
-    setModelScale(x, y, z, instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.transform.scale.set([x, y, z]);
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
+    // Helper method for Model class to invalidate animation cache
+    invalidateAnimationCache(instanceId) {
+        // Delegate to animation controller which manages the cache
+        this._animationController.invalidateCache(instanceId);
     }
     setModelBindPose(instance) {
         const instanceData = this.instances.get(instance.instanceId.id);
@@ -17258,24 +17307,14 @@ class InstanceManager {
             this._animationController.setBindPose(instanceData);
         }
     }
-    playModelAnimation(animationName, instance, options) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            this.startAnimation(instanceData, animationName, options);
-        }
-    }
+    // Removed - Model handles this directly
     updateModelAnimation(instance, deltaTime) {
         const instanceData = this.instances.get(instance.instanceId.id);
         if (instanceData) {
             this.updateAnimation(instanceData, deltaTime);
         }
     }
-    stopModelAnimation(instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.animationState.currentAnimation = null;
-        }
-    }
+    // Removed - Model handles these directly
     createError(code, message) {
         return { name: 'ModelError', code, message };
     }
@@ -17502,13 +17541,7 @@ class InstanceManager {
         this.instances.delete(instanceId);
         this.dirtyInstances.delete(instanceId);
     }
-    setModelNormalMapEnabled(enabled, instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.renderOptions.useNormalMap = enabled;
-            this.dirtyInstances.add(instance.instanceId.id);
-        }
-    }
+    // Removed - Model handles this directly
     setDebugShadowMap(enabled) {
         this.debugShadowMap = enabled;
     }
@@ -17541,21 +17574,7 @@ class InstanceManager {
     getShadowMapManager() {
         return this.shadowMapManager;
     }
-    enableAllModelNodes(instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.disabledNodes.clear();
-            instanceData.allNodesDisabled = false;
-        }
-    }
-    disableAllModelNodes(instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            instanceData.allNodesDisabled = true;
-            // Clear individual disabled nodes since all are disabled
-            instanceData.disabledNodes.clear();
-        }
-    }
+    // Removed - Model handles these directly
     enableModelNode(nodeName, instance) {
         const instanceData = this.instances.get(instance.instanceId.id);
         if (instanceData) {
@@ -17577,30 +17596,7 @@ class InstanceManager {
             }
         }
     }
-    disableModelNode(nodeName, instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
-            if ((modelData === null || modelData === void 0 ? void 0 : modelData.nodeNameMap) && !modelData.nodeNameMap.has(nodeName)) {
-                console.warn(`[InstanceManager] Node '${nodeName}' not found in model '${instance.instanceId.modelId}'`);
-            }
-            if (instanceData.allNodesDisabled) {
-                // All nodes are already disabled, nothing to do
-                return;
-            }
-            instanceData.disabledNodes.add(nodeName);
-        }
-    }
-    isModelNodeEnabled(nodeName, instance) {
-        const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            if (instanceData.allNodesDisabled) {
-                return false;
-            }
-            return !instanceData.disabledNodes.has(nodeName);
-        }
-        return true; // Default to enabled if instance not found
-    }
+    // Removed - Model handles these directly
     get animationController() {
         return this._animationController;
     }

@@ -1,12 +1,18 @@
-import { InstanceId, IModel, IInstanceManager, AnimationOptions } from './types';
+import { InstanceId, IModel, IInstanceManager, AnimationOptions, InstanceData } from './types';
 export declare class Model implements IModel {
     readonly instanceId: InstanceId;
     private _manager;
-    constructor(instanceId: InstanceId, manager: IInstanceManager);
-    setNormalMapEnabled(enabled: boolean): void;
+    private _instanceData;
+    constructor(instanceId: InstanceId, manager: IInstanceManager, instanceData: InstanceData);
+    get animationSpeed(): number;
+    set animationSpeed(speed: number);
+    get normalMapEnabled(): boolean;
+    set normalMapEnabled(enabled: boolean);
     setPosition(x: number, y: number, z: number): void;
     setRotation(quaternion: Float32Array): void;
     setScale(x: number, y: number, z: number): void;
+    setAnimationSpeed(speed: number): void;
+    setNormalMapEnabled(enabled: boolean): void;
     playAnimation(animationName: string, options?: AnimationOptions): void;
     updateAnimation(deltaTime: number): void;
     stopAnimation(): void;

@@ -18,7 +18,7 @@ const packageJson = {
 };
 
 // Create the rendera-types directory if it doesn't exist
-const typesDir = path.join(__dirname, 'rendera-types');
+const typesDir = path.join(__dirname, '..', 'rendera-types');
 if (!fs.existsSync(typesDir)) {
   fs.mkdirSync(typesDir, { recursive: true });
 }
@@ -84,5 +84,54 @@ fs.writeFileSync(
   readme
 );
 
+// Copy all .d.ts and .d.ts.map files from Addon/modules to rendera-types
+const modulesDir = path.join(__dirname, '..', 'Addon', 'modules');
+if (fs.existsSync(modulesDir)) {
+  const files = fs.readdirSync(modulesDir);
+  files.forEach(file => {
+    if (file.endsWith('.d.ts') || file.endsWith('.d.ts.map')) {
+      const sourcePath = path.join(modulesDir, file);
+      const destPath = path.join(typesDir, file);
+      fs.copyFileSync(sourcePath, destPath);
+      console.log(`Copied ${file}`);
+    }
+  });
+}
+
+// Create an index.d.ts that exports all the main types
+const indexContent = `// Main exports for Rendera 3D renderer
+export { InstanceManager } from './InstanceManager';
+export { Model } from './Model';
+export { ModelLoader } from './ModelLoader';
+export { AnimationController } from './AnimationController';
+export { GPUResourceManager } from './GPUResourceManager';
+export { ShadowMapManager } from './ShadowMapManager';
+export * from './types';
+
+// Global declaration for Rendera
+declare global {
+  interface Window {
+    rendera: {
+      instanceManager: InstanceManager;
+      modelLoader: ModelLoader;
+      gpuResourceManager: GPUResourceManager;
+    };
+  }
+  
+  var rendera: {
+    instanceManager: InstanceManager;
+    modelLoader: ModelLoader;
+    gpuResourceManager: GPUResourceManager;
+  };
+}
+
+export {};
+`;
+
+fs.writeFileSync(
+  path.join(typesDir, 'index.d.ts'),
+  indexContent
+);
+
 console.log('Types package setup complete!');
-console.log('Run "npm run copy-types" in Addon/Model to copy the type files.');
+console.log(`Created rendera-types package in ${typesDir}`);
