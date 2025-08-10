@@ -16,6 +16,8 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     private dirtyLightStates;
     private cameraPosition;
     private dirtyCameraPosition;
+    private giState;
+    private dirtyGIState;
     private boneUBO;
     private readonly BONE_UBO_BINDING_POINT;
     constructor(gl: WebGL2RenderingContext);
@@ -37,9 +39,14 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     getDefaultShader(): WebGLProgram;
     updateLight(index: number, lightParams: Partial<Light>): void;
     updateCameraPosition(position: [number, number, number]): void;
+    setGISkyColor(color: [number, number, number]): void;
+    setGIGroundColor(color: [number, number, number]): void;
+    setGIIntensity(intensity: number): void;
+    setLambertWrap(wrap: number): void;
     setLightEnabled(index: number, enabled: boolean): void;
     private updateLightUniforms;
     private updateCameraPositionUniforms;
+    private updateGIUniforms;
     private updateAllLightUniforms;
     private updateLightEnableStates;
     private getLightTypeValue;

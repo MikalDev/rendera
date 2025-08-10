@@ -14362,6 +14362,14 @@ class GPUResourceManager {
         this.dirtyLightStates = new Set();
         this.cameraPosition = [0, 0, 0];
         this.dirtyCameraPosition = false;
+        // Global Illumination state
+        this.giState = {
+            skyColor: [0.5, 0.7, 1.0], // Light blue sky
+            groundColor: [0.2, 0.15, 0.1], // Brown ground
+            intensity: 0.2, // Default 20% GI contribution
+            lambertWrap: 0.1 // Slight shadow softening
+        };
+        this.dirtyGIState = true; // Set to true initially to apply default values
         // UBO for bone matrices
         this.boneUBO = null;
         this.BONE_UBO_BINDING_POINT = 0;
@@ -14631,6 +14639,12 @@ class GPUResourceManager {
         uniform vec3 u_EmissiveFactor;
         uniform float u_MetallicFactor;
         uniform float u_RoughnessFactor;
+        
+        // Global Illumination uniforms (with defaults for safety)
+        uniform vec3 u_SkyColor;
+        uniform vec3 u_GroundColor;
+        uniform float u_GIIntensity;
+        uniform float u_LambertWrap;
 
         uniform sampler2D u_BaseColorSampler;
         uniform sampler2D u_NormalSampler;
@@ -14746,7 +14760,10 @@ class GPUResourceManager {
             }
             
             vec3 H = normalize(V + L);
-            float NdotL = max(dot(N, L), 0.0);
+            
+            // Apply Lambert wrap for softer shadows
+            float NdotL = (dot(N, L) + u_LambertWrap) / (1.0 + u_LambertWrap);
+            NdotL = max(NdotL, 0.0);
             
             if (NdotL <= 0.0) return vec3(0.0);
             
@@ -14836,7 +14853,8 @@ class GPUResourceManager {
             vec4 baseColorSample = texture(u_BaseColorSampler, v_UV) * u_BaseColorFactor;
             vec4 metallicRoughness = texture(u_MetallicRoughnessSampler, v_UV);
             vec4 emissiveSample = texture(u_EmissiveSampler, v_UV) * vec4(u_EmissiveFactor, 1.0);
-            float aoSample = texture(u_OcclusionSampler, v_UV).r;
+            // Default to 1.0 if AO texture is black/missing
+            float aoSample = max(texture(u_OcclusionSampler, v_UV).r, 0.01);
             
             vec3 baseColor = SRGBtoLinear(baseColorSample.rgb);
             float metallic = metallicRoughness.b * u_MetallicFactor;
@@ -14853,13 +14871,29 @@ class GPUResourceManager {
                 int shadowMapIndex = u_LightToShadowMap[i];
                 if (shadowMapIndex >= 0 && shadowMapIndex < MAX_SHADOW_MAPS) {
                     shadow = calculateShadowForMap(v_PositionsFromLight[shadowMapIndex], shadowMapIndex, u_Lights[i]);
+                    // Soften shadow edges with Lambert wrap
+                    // When wrap is 1.0, shadows become much softer
+                    shadow = mix(shadow, 1.0, u_LambertWrap * 0.5);
                 }
                 
                 color += lightContrib * shadow;
             }
             
-            // Add ambient and emissive (unaffected by shadows)
-            vec3 ambient = vec3(0.03) * baseColor * aoSample;
+            // Calculate hemispheric ambient GI
+            vec3 hemisphericAmbient = vec3(0.0);
+            if (u_GIIntensity > 0.0) {
+                // In this coordinate system, Y+ is down, so we need to invert
+                // Map normal Y component from [-1,1] to [0,1] for blending
+                // When N.y is -1 (pointing up), we want sky color (upFactor = 1)
+                // When N.y is +1 (pointing down), we want ground color (upFactor = 0)
+                float upFactor = (-N.y + 1.0) * 0.5;
+                hemisphericAmbient = mix(u_GroundColor, u_SkyColor, upFactor) * u_GIIntensity;
+            }
+            
+            // Add ambient (including GI), AO, and emissive (unaffected by shadows)
+            // Lambert wrap also increases base ambient to fill in shadows
+            float baseAmbient = 0.03 + (u_LambertWrap * 0.1);
+            vec3 ambient = (vec3(baseAmbient) + hemisphericAmbient) * baseColor * aoSample;
             vec3 emissive = SRGBtoLinear(emissiveSample.rgb);
             color += ambient + emissive;
             
@@ -14867,9 +14901,13 @@ class GPUResourceManager {
             color = color / (color + vec3(1.0)); // Simple Reinhard tone mapping
             color = pow(color, vec3(1.0/2.2));   // Gamma correction
             
-            // Debug: Show shadow map
-            // fragColor = vec4(vec3(shadow), 1.0);
-
+            // Debug: Visualize GI contribution
+            // Uncomment one of these lines to debug:
+            // fragColor = vec4(hemisphericAmbient, 1.0); // Show only GI
+            // float debugUpFactor = (-N.y + 1.0) * 0.5;
+            // fragColor = vec4(vec3(debugUpFactor), 1.0); // Show normal Y mapping (white = up, black = down)
+            // fragColor = vec4(u_SkyColor * u_GIIntensity, 1.0); // Show sky color
+            
             fragColor = vec4(color, baseColorSample.a);
         }`;
         const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
@@ -14885,6 +14923,29 @@ class GPUResourceManager {
     updateCameraPosition(position) {
         this.cameraPosition = position;
         this.dirtyCameraPosition = true;
+    }
+    // Global Illumination methods
+    setGISkyColor(color) {
+        console.log('[GI] Setting sky color:', color);
+        this.giState.skyColor = color;
+        this.dirtyGIState = true;
+    }
+    setGIGroundColor(color) {
+        console.log('[GI] Setting ground color:', color);
+        this.giState.groundColor = color;
+        this.dirtyGIState = true;
+    }
+    setGIIntensity(intensity) {
+        // Clamp between 0 and 1
+        this.giState.intensity = Math.max(0, Math.min(1, intensity));
+        console.log('[GI] Setting intensity:', this.giState.intensity);
+        this.dirtyGIState = true;
+    }
+    setLambertWrap(wrap) {
+        // Clamp between 0 and 1
+        this.giState.lambertWrap = Math.max(0, Math.min(1, wrap));
+        console.log('[GI] Setting Lambert wrap:', this.giState.lambertWrap);
+        this.dirtyGIState = true;
     }
     setLightEnabled(index, enabled) {
         if (index >= this.MAX_LIGHTS)
@@ -14911,6 +14972,36 @@ class GPUResourceManager {
         if (this.dirtyCameraPosition) {
             this.gl.uniform3fv(this.gl.getUniformLocation(shader, 'u_CameraPosition'), this.cameraPosition);
             this.dirtyCameraPosition = false;
+        }
+    }
+    updateGIUniforms(shader) {
+        if (this.dirtyGIState) {
+            const skyLoc = this.gl.getUniformLocation(shader, 'u_SkyColor');
+            const groundLoc = this.gl.getUniformLocation(shader, 'u_GroundColor');
+            const intensityLoc = this.gl.getUniformLocation(shader, 'u_GIIntensity');
+            const wrapLoc = this.gl.getUniformLocation(shader, 'u_LambertWrap');
+            if (skyLoc)
+                this.gl.uniform3fv(skyLoc, this.giState.skyColor);
+            if (groundLoc)
+                this.gl.uniform3fv(groundLoc, this.giState.groundColor);
+            if (intensityLoc)
+                this.gl.uniform1f(intensityLoc, this.giState.intensity);
+            if (wrapLoc)
+                this.gl.uniform1f(wrapLoc, this.giState.lambertWrap);
+            // Debug logging
+            console.log('[GI] Updating uniforms:', {
+                skyColor: this.giState.skyColor,
+                groundColor: this.giState.groundColor,
+                intensity: this.giState.intensity,
+                lambertWrap: this.giState.lambertWrap,
+                locations: {
+                    sky: skyLoc !== null,
+                    ground: groundLoc !== null,
+                    intensity: intensityLoc !== null,
+                    wrap: wrapLoc !== null
+                }
+            });
+            this.dirtyGIState = false;
         }
     }
     updateAllLightUniforms(shader) {
@@ -14957,6 +15048,7 @@ class GPUResourceManager {
         this.gl.useProgram(shader);
         this.updateCameraPositionUniforms(shader);
         this.updateLightUniforms(shader);
+        this.updateGIUniforms(shader);
         materialSystem.bindMaterial(materialIndex, shader);
     }
     setLightDirection(index, direction) {

@@ -90,6 +90,56 @@ export default class LightsCategory {
         }
     }
 
+    @Action('setGISkyColor', 'Set GI Sky Color', 'Set global illumination sky color to {0}', 'Set the color of light coming from above (sky hemisphere)', {
+        params: [
+            addParam('color', 'Sky Color', { type: Param.Number, desc: 'RGB color for light from above' })
+        ]
+    })
+    setGISkyColor(this: Instance, color: number) {
+        // @ts-ignore
+        const r = C3.GetRValue(color);
+        // @ts-ignore
+        const g = C3.GetGValue(color);
+        // @ts-ignore
+        const b = C3.GetBValue(color);
+        // C3 returns values 0-1, so we use them directly
+        this.gpuResourceManager.setGISkyColor([r, g, b]);
+    }
+
+    @Action('setGIGroundColor', 'Set GI Ground Color', 'Set global illumination ground color to {0}', 'Set the color of light bouncing from below (ground hemisphere)', {
+        params: [
+            addParam('color', 'Ground Color', { type: Param.Number, desc: 'RGB color for light from below' })
+        ]
+    })
+    setGIGroundColor(this: Instance, color: number) {
+        // @ts-ignore
+        const r = C3.GetRValue(color);
+        // @ts-ignore
+        const g = C3.GetGValue(color);
+        // @ts-ignore
+        const b = C3.GetBValue(color);
+        // C3 returns values 0-1, so we use them directly
+        this.gpuResourceManager.setGIGroundColor([r, g, b]);
+    }
+
+    @Action('setGIIntensity', 'Set GI Intensity', 'Set global illumination intensity to {0}', 'Set the intensity of global illumination (0-1)', {
+        params: [
+            addParam('intensity', 'GI Intensity', { type: Param.Number, initialValue: 0.2, desc: 'Global illumination contribution (0 = off, 1 = full)' })
+        ]
+    })
+    setGIIntensity(this: Instance, intensity: number) {
+        this.gpuResourceManager.setGIIntensity(intensity);
+    }
+
+    @Action('setLambertWrap', 'Set Lambert Wrap', 'Set Lambert wrap to {0}', 'Set the Lambert wrap factor for softer shadows (0-1)', {
+        params: [
+            addParam('wrap', 'Lambert Wrap', { type: Param.Number, initialValue: 0.1, desc: 'Shadow softness factor (0 = hard shadows, 1 = very soft)' })
+        ]
+    })
+    setLambertWrap(this: Instance, wrap: number) {
+        this.gpuResourceManager.setLambertWrap(wrap);
+    }
+
     /** @Conditions */
     // @Condition('onCondition', 'On condition', 'On condition')
     // onCondition() {

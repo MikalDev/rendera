@@ -71,7 +71,7 @@ The shadow mapping system (`Addon/Model/src/rendering/ShadowMapManager.ts`) supp
 
 1. **Lost Framework** (`lost.config.ts`): Constructs the Construct 3 addon structure
 2. **Model Module Build** (`Addon/Model/rollup.config.js`): Bundles TypeScript into ES modules
-3. **Post-Build** (`Tools/build_post.js`): Reorders addon.json for proper loading
+3. **Post-Build** (`Tools/post-build.ts`): Reorders addon.json for proper loading
 
 ## Development Tips
 
@@ -84,7 +84,7 @@ The shadow mapping system (`Addon/Model/src/rendering/ShadowMapManager.ts`) supp
 
 Follow the branch naming convention: `<type>/<ticket-id>/<description>`
 - Types: feature, bugfix, hotfix, release, docs, test, chore, refactor
-- Example: `feature/shadow-map`
+- Example: `feature/shadow-map-improvements`
 
 ## Design Principles
 
