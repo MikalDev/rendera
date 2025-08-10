@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "./modules/*": ["./modules/*"]
+    },
+    "types": ["./Types/construct"]
+  },
+  "include": [
+    "**/*.ts",
+    "Types/**/*.d.ts",
+    "modules/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "Model/node_modules"
+  ]
+}
