@@ -1,34 +1,82 @@
 declare const glMatrix: any;
-declare let mat4: any;
-declare let vec3: any;
-declare let vec4: any;
-declare let quat: any;
+declare const mat4: any;
+declare const vec3: any;
+declare const vec4: any;
+declare const quat: any;
 interface CacheModelRequest {
     type: 'CACHE_MODEL';
     modelId: string;
-    nodeIndex: number;
-    inverseBindMatrices: Float32Array;
-    jointIndices: Uint16Array;
+    hierarchy: {
+        nodeCount: number;
+        parentIndices: Int32Array;
+        bindPoseTransforms: Float32Array;
+    };
+    animations: Array<{
+        name: string;
+        channels: Array<{
+            nodeIndex: number;
+            targetPath: 'translation' | 'rotation' | 'scale';
+            times: Float32Array;
+            values: Float32Array;
+        }>;
+    }>;
+    skins: Array<{
+        nodeIndex: number;
+        inverseBindMatrices: Float32Array;
+        jointIndices: Uint16Array;
+    }>;
 }
-interface AnimationRequest {
-    type: 'CALCULATE_BONES';
+interface ComputeAnimationRequest {
+    type: 'COMPUTE_ANIMATION';
     instanceId: number;
     requestId: number;
     modelId: string;
-    nodeIndex: number;
-    nodeMatrices: Float32Array;
+    animationName: string;
+    animationTime: number;
+    loop: boolean;
+    needsBones: boolean;
 }
-interface AnimationResponse {
-    type: 'BONES_CALCULATED';
+interface ComputeAnimationResponse {
+    type: 'ANIMATION_COMPUTED';
     instanceId: number;
     requestId: number;
-    boneMatrices: Float32Array;
+    nodeTransforms: Float32Array;
+    animationMatrices: Float32Array;
+    boneMatricesMap?: Map<number, Float32Array>;
 }
 interface ModelCache {
-    nodeIndex: number;
-    inverseBindMatrices: Float32Array;
-    jointIndices: Uint16Array;
+    skins: Map<number, {
+        inverseBindMatrices: Float32Array;
+        jointIndices: Uint16Array;
+    }>;
+}
+interface AnimationCache {
+    channels: AnimationChannel[];
+    duration: number;
+}
+interface HierarchyCache {
+    nodeCount: number;
+    parentIndices: Int32Array;
+    bindPoseTransforms: Float32Array;
+}
+interface InstanceState {
+    modelId: string;
+    lastAnimationName?: string;
+    lastAnimationTime?: number;
+    cachedKeyframeIndices?: Map<string, number>;
 }
 declare const modelCache: Map<string, ModelCache>;
-declare function calculateBoneMatricesWithCache(nodeMatrices: Float32Array, inverseBindMatrices: Float32Array, jointIndices: Uint16Array, nodeIndex: number): Float32Array;
+declare const animationCache: Map<string, Map<string, AnimationCache>>;
+declare const hierarchyCache: Map<string, HierarchyCache>;
+declare const instanceStates: Map<number, InstanceState>;
+declare function handleComputeAnimation(request: ComputeAnimationRequest): void;
+declare function interpolateAnimation(animation: AnimationCache, hierarchy: HierarchyCache, time: number, keyframeCache: Map<string, number>): Float32Array;
+declare function findKeyframeIndices(times: Float32Array, time: number, hint?: number): {
+    startIndex: number;
+    endIndex: number;
+    factor: number;
+};
+declare function interpolateValues(values: Float32Array, startIndex: number, endIndex: number, factor: number, targetPath: string): Float32Array;
+declare function computeHierarchyTransforms(nodeTransforms: Float32Array, hierarchy: HierarchyCache): Float32Array;
+declare function computeAllBoneMatricesFromHierarchy(animationMatrices: Float32Array, modelData: ModelCache, nodeCount: number): Map<number, Float32Array>;
 //# sourceMappingURL=AnimationWorker.d.ts.map

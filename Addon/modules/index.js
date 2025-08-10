@@ -15379,13 +15379,12 @@ class AnimationWorkerManager {
         this.isWorkerReady = false;
         this.requestCounter = 0;
         this.cachedModels = new Set();
+        this.instanceCache = new Map();
         // No runtime needed with standard Worker API
     }
     // Initialize worker (called when animation worker is enabled)
     async initialize() {
-        console.log('[AnimationWorkerManager] initialize() called');
         if (this.isInitialized) {
-            console.log('[AnimationWorkerManager] Already initialized, returning');
             return;
         }
         try {
@@ -15393,22 +15392,12 @@ class AnimationWorkerManager {
             let workerUrl = 'c3runtime/modules/workers/AnimationWorker.js';
             // Check if we're running in a worker context
             if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
-                console.log('[AnimationWorkerManager] Running in worker context');
                 // When creating a worker from within a worker, URLs are relative to the worker's location
                 workerUrl = new URL('./workers/AnimationWorker.js', self.location.href).href;
             }
             else if (typeof window !== 'undefined') {
-                // We're in the main thread
-                console.log('[AnimationWorkerManager] Window location:', {
-                    href: window.location.href,
-                    hostname: window.location.hostname,
-                    pathname: window.location.pathname,
-                    protocol: window.location.protocol
-                });
                 // Check if we're in Construct preview
                 if (window.location.hostname.includes('preview.construct.net')) {
-                    // For preview.construct.net, extract the path from the current document
-                    console.log('[AnimationWorkerManager] Construct preview mode detected');
                     // Get the current script path from the stack trace or document
                     let scriptPath = '';
                     try {
@@ -15418,11 +15407,10 @@ class AnimationWorkerManager {
                         const match = stack.match(/https?:\/\/[^)]+\.js/);
                         if (match) {
                             scriptPath = new URL(match[0]).pathname;
-                            console.log('[AnimationWorkerManager] Script path from stack:', scriptPath);
                         }
                     }
                     catch (e) {
-                        console.log('[AnimationWorkerManager] Could not extract script path from stack');
+                        // Ignore
                     }
                     // If we couldn't get it from stack, try looking for our script in the document
                     if (!scriptPath) {
@@ -15430,7 +15418,6 @@ class AnimationWorkerManager {
                         const ourScript = scripts.find(s => s.src.includes('rendera') && s.src.includes('index.js'));
                         if (ourScript) {
                             scriptPath = new URL(ourScript.src).pathname;
-                            console.log('[AnimationWorkerManager] Script path from document:', scriptPath);
                         }
                     }
                     // The script is at /scripts/plugins/rendera/c3runtime/modules/index.js
@@ -15440,7 +15427,6 @@ class AnimationWorkerManager {
                     if (pathMatch) {
                         const basePath = pathMatch[1];
                         workerUrl = `${basePath}c3runtime/modules/workers/AnimationWorker.js`;
-                        console.log('[AnimationWorkerManager] Using base path:', basePath);
                     }
                     else {
                         // Try another approach - get everything before c3runtime
@@ -15448,7 +15434,6 @@ class AnimationWorkerManager {
                         if (altMatch) {
                             const basePath = altMatch[1];
                             workerUrl = `${basePath}c3runtime/modules/workers/AnimationWorker.js`;
-                            console.log('[AnimationWorkerManager] Using alt base path:', basePath);
                         }
                         else {
                             // Fallback
@@ -15462,33 +15447,17 @@ class AnimationWorkerManager {
                         window.location.hostname === 'localhost' ||
                         window.location.hostname === '127.0.0.1';
                     if (isDeveloperMode) {
-                        console.log('[AnimationWorkerManager] Developer mode detected');
                         const baseUrl = new URL('./', window.location.href).href;
                         workerUrl = new URL('c3runtime/modules/workers/AnimationWorker.js', baseUrl).href;
                     }
                 }
             }
-            console.log('[AnimationWorkerManager] Creating worker with URL:', workerUrl);
-            console.log('[AnimationWorkerManager] Current location:', window.location.href);
             try {
-                // First try creating an inline worker to test if workers are allowed at all
-                try {
-                    const blob = new Blob(['console.log("Inline worker test");'], { type: 'application/javascript' });
-                    const testWorker = new Worker(URL.createObjectURL(blob));
-                    console.log('[AnimationWorkerManager] Inline worker test successful');
-                    testWorker.terminate();
-                }
-                catch (inlineError) {
-                    console.error('[AnimationWorkerManager] Cannot create inline worker:', inlineError);
-                    console.error('[AnimationWorkerManager] This might be a CSP issue');
-                }
                 this.worker = new Worker(workerUrl);
-                console.log('[AnimationWorkerManager] Worker created successfully');
                 // Set up message handler
                 this.worker.onmessage = (event) => {
                     // Check for ready message
                     if (event.data.type === 'WORKER_READY') {
-                        console.log('[AnimationWorkerManager] Worker is ready');
                         this.isWorkerReady = true;
                     }
                     this.handleWorkerMessage(event);
@@ -15503,7 +15472,6 @@ class AnimationWorkerManager {
                     this.handleWorkerError(error);
                 };
                 this.isInitialized = true;
-                console.log('[AnimationWorkerManager] Worker initialized');
             }
             catch (err) {
                 console.error('[AnimationWorkerManager] Failed to create worker:', err);
@@ -15516,98 +15484,168 @@ class AnimationWorkerManager {
             this.isInitialized = false;
         }
     }
-    // Cache model data in worker
-    async cacheModel(modelId, nodeIndex, inverseBindMatrices, jointIndices) {
+    // Unified model caching - sends ALL model data in one message
+    async cacheModel(modelId, modelData) {
         if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
             throw new Error('AnimationWorker not ready');
         }
         if (this.cachedModels.has(modelId)) {
             return; // Already cached
         }
+        // Prepare hierarchy data
+        const nodeCount = modelData.nodes.length;
+        const parentIndices = new Int32Array(nodeCount);
+        const bindPoseTransforms = new Float32Array(nodeCount * 10);
+        modelData.nodes.forEach((node, i) => {
+            var _a;
+            const extNode = node;
+            parentIndices[i] = (_a = extNode.indexData.parentIndex) !== null && _a !== void 0 ? _a : -1;
+            const offset = i * 10;
+            const translation = node.getTranslation() || [0, 0, 0];
+            const rotation = node.getRotation() || [0, 0, 0, 1];
+            const scale = node.getScale() || [1, 1, 1];
+            bindPoseTransforms[offset] = translation[0];
+            bindPoseTransforms[offset + 1] = translation[1];
+            bindPoseTransforms[offset + 2] = translation[2];
+            bindPoseTransforms[offset + 3] = rotation[0];
+            bindPoseTransforms[offset + 4] = rotation[1];
+            bindPoseTransforms[offset + 5] = rotation[2];
+            bindPoseTransforms[offset + 6] = rotation[3];
+            bindPoseTransforms[offset + 7] = scale[0];
+            bindPoseTransforms[offset + 8] = scale[1];
+            bindPoseTransforms[offset + 9] = scale[2];
+        });
+        // Prepare animations data
+        const animationBatch = [];
+        const transfers = [];
+        // Add hierarchy buffers to transfers
+        transfers.push(parentIndices.buffer, bindPoseTransforms.buffer);
+        for (const [animName, animation] of modelData.animations) {
+            const channels = [];
+            for (const channel of animation.listChannels()) {
+                const sampler = channel.getSampler();
+                const targetNode = channel.getTargetNode();
+                const targetPath = channel.getTargetPath();
+                if (!sampler || !targetNode || !targetPath)
+                    continue;
+                const input = sampler.getInput();
+                const output = sampler.getOutput();
+                if (!input || !output)
+                    continue;
+                const times = new Float32Array(input.getArray());
+                const values = new Float32Array(output.getArray());
+                channels.push({
+                    nodeIndex: targetNode.indexData.nodeIndex,
+                    targetPath,
+                    times,
+                    values
+                });
+                transfers.push(times.buffer, values.buffer);
+            }
+            animationBatch.push({ name: animName, channels });
+        }
+        // Prepare skins data - no need to copy, arrays are already new from AnimationController
+        const skinsData = modelData.skins.map(skin => {
+            transfers.push(skin.inverseBindMatrices.buffer, skin.jointIndices.buffer);
+            return {
+                nodeIndex: skin.nodeIndex,
+                inverseBindMatrices: skin.inverseBindMatrices,
+                jointIndices: skin.jointIndices
+            };
+        });
         return new Promise((resolve) => {
-            // Copy data for transfer
-            const inverseBindMatricesCopy = new Float32Array(inverseBindMatrices);
-            const jointIndicesCopy = new Uint16Array(jointIndices);
-            // Send cache request
+            // Send everything in one message
             this.worker.postMessage({
                 type: 'CACHE_MODEL',
                 modelId,
-                nodeIndex,
-                inverseBindMatrices: inverseBindMatricesCopy,
-                jointIndices: jointIndicesCopy
-            }, [
-                inverseBindMatricesCopy.buffer,
-                jointIndicesCopy.buffer
-            ]);
+                hierarchy: {
+                    nodeCount,
+                    parentIndices,
+                    bindPoseTransforms
+                },
+                animations: animationBatch,
+                skins: skinsData
+            }, transfers);
+            // Mark as cached immediately
             this.cachedModels.add(modelId);
-            // Cache message handler
-            const cacheHandler = (event) => {
+            // Wait for confirmation
+            const handler = (event) => {
                 if (event.data.type === 'MODEL_CACHED' && event.data.modelId === modelId) {
-                    this.worker.removeEventListener('message', cacheHandler);
+                    this.worker.removeEventListener('message', handler);
                     resolve();
                 }
             };
-            this.worker.addEventListener('message', cacheHandler);
+            this.worker.addEventListener('message', handler);
         });
     }
-    // Calculate bone matrices using worker
-    calculateBoneMatrices(instanceId, modelId, nodeIndex, nodeMatrices, inverseBindMatrices, jointIndices) {
+    // Check if model is cached and ready for animation
+    isModelReady(modelId) {
+        return this.cachedModels.has(modelId);
+    }
+    // Fire-and-forget animation request with callback
+    requestAnimation(instanceId, modelId, animationName, animationTime, loop, needsBones, callback) {
         if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
-            // Return a promise that rejects so the fallback can handle it
-            return Promise.reject(new Error('AnimationWorker not ready'));
+            console.warn('[AnimationWorkerManager] Worker not ready for animation request');
+            return;
         }
-        // Cache model data if not already cached
-        if (!this.cachedModels.has(modelId)) {
-            return this.cacheModel(modelId, nodeIndex, inverseBindMatrices, jointIndices)
-                .then(() => this.calculateBoneMatrices(instanceId, modelId, nodeIndex, nodeMatrices, inverseBindMatrices, jointIndices));
+        const requestId = ++this.requestCounter;
+        // Store callback instead of promise handlers
+        this.pendingRequests.set(requestId, {
+            resolve: callback,
+            reject: (error) => console.error('[AnimationWorkerManager] Animation failed:', error),
+            instanceId
+        });
+        // Send request immediately without waiting
+        this.worker.postMessage({
+            type: 'COMPUTE_ANIMATION',
+            instanceId,
+            requestId,
+            modelId,
+            animationName,
+            animationTime,
+            loop,
+            needsBones
+        });
+    }
+    // Keep the old method for backward compatibility but mark as deprecated
+    /** @deprecated Use requestAnimation for better performance */
+    computeAnimation(instanceId, modelId, animationName, animationTime, loop, needsBones) {
+        if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
+            return Promise.reject(new Error('AnimationWorker not ready'));
         }
         return new Promise((resolve, reject) => {
             const requestId = ++this.requestCounter;
             // Store promise handlers
-            this.pendingRequests.set(requestId, { resolve, reject });
-            // Log data sizes once to understand performance
-            if (this.requestCounter === 1) {
-                const jointCount = (nodeMatrices.length - 16) / 16;
-                console.log('[AnimationWorkerManager] Optimized data transfer per frame:', {
-                    nodeMatrix: '1 matrix (16 floats, 64 bytes)',
-                    jointMatrices: `${jointCount} matrices (${jointCount * 16} floats, ${jointCount * 64} bytes)`,
-                    totalFloats: nodeMatrices.length,
-                    totalKB: (nodeMatrices.byteLength / 1024).toFixed(2),
-                    reduction: 'Zero-copy transfer using transferables'
-                });
-            }
-            // Send to worker with zero-copy transfer
-            // Debug timing for first few frames
-            const startTime = this.requestCounter <= 3 ? performance.now() : 0;
+            this.pendingRequests.set(requestId, { resolve, reject, instanceId });
             this.worker.postMessage({
-                type: 'CALCULATE_BONES',
+                type: 'COMPUTE_ANIMATION',
                 instanceId,
                 requestId,
                 modelId,
-                nodeIndex,
-                nodeMatrices: nodeMatrices
-            }, [
-                nodeMatrices.buffer
-            ]);
-            if (this.requestCounter <= 3) {
-                console.log(`[AnimationWorkerManager] postMessage took ${(performance.now() - startTime).toFixed(2)}ms`);
-            }
+                animationName,
+                animationTime,
+                loop,
+                needsBones
+            });
         });
     }
     // Handle worker responses
     handleWorkerMessage(event) {
-        const { type, requestId, boneMatrices } = event.data;
-        if (type === 'BONES_CALCULATED') {
+        const { type, requestId } = event.data;
+        if (type === 'ANIMATION_COMPUTED') {
             const request = this.pendingRequests.get(requestId);
             if (request) {
                 this.pendingRequests.delete(requestId);
-                request.resolve(boneMatrices);
-            }
-            else {
-                console.warn('[AnimationWorkerManager] No pending request found for requestId:', requestId);
+                const result = {
+                    nodeTransforms: event.data.nodeTransforms,
+                    animationMatrices: event.data.animationMatrices,
+                    boneMatricesMap: event.data.boneMatricesMap
+                };
+                request.resolve(result);
             }
         }
-        else if (type !== 'WORKER_READY') {
+        else if (type !== 'WORKER_READY' &&
+            type !== 'MODEL_CACHED') {
             console.warn('[AnimationWorkerManager] Unknown message type from worker:', type);
         }
     }
@@ -15628,7 +15666,7 @@ class AnimationWorkerManager {
             this.isInitialized = false;
             this.isWorkerReady = false;
             this.pendingRequests.clear();
-            console.log('[AnimationWorkerManager] Worker terminated');
+            this.instanceCache.clear();
         }
     }
 }
@@ -15638,39 +15676,71 @@ class AnimationController {
         this.modelLoader = modelLoader;
         this.useWorker = false;
         this.workerManager = null;
+        this.instanceCache = new Map();
         this.modelLoader = modelLoader;
     }
     setUseWorker(enabled) {
-        console.log(`[AnimationController] setUseWorker called with enabled=${enabled}`);
         this.useWorker = enabled;
-        console.log(`[AnimationController] Current workerManager state:`, this.workerManager ? 'exists' : 'null');
         // Initialize or terminate worker based on setting
         if (enabled) {
             if (!this.workerManager) {
-                console.log('[AnimationController] Creating new AnimationWorkerManager');
                 this.workerManager = new AnimationWorkerManager();
-                console.log('[AnimationController] Calling workerManager.initialize()');
-                this.workerManager.initialize().then(() => {
-                    console.log('[AnimationController] Worker manager initialized successfully');
-                }).catch((error) => {
-                    console.error('[AnimationController] Worker manager initialization failed:', error);
+                this.workerManager.initialize().catch((error) => {
+                    console.error('[AnimationController] Worker initialization failed:', error);
                 });
-            }
-            else {
-                console.log('[AnimationController] Worker manager already exists');
             }
         }
         else {
             if (this.workerManager) {
-                console.log('[AnimationController] Terminating worker manager');
                 this.workerManager.terminate();
                 this.workerManager = null;
             }
-            else {
-                console.log('[AnimationController] No worker manager to terminate');
-            }
         }
-        console.log(`[AnimationController] Worker mode ${enabled ? 'enabled' : 'disabled'}`);
+    }
+    // Cache model data in worker when model is loaded
+    async cacheModelInWorker(modelId) {
+        var _a, _b;
+        if (!this.workerManager || !this.useWorker)
+            return;
+        const modelData = this.modelLoader.getModelData(modelId);
+        if (!modelData)
+            return;
+        try {
+            // Prepare skins data
+            const skinsToCache = [];
+            if (((_a = modelData.jointData) === null || _a === void 0 ? void 0 : _a.length) > 0) {
+                for (const renderableNode of modelData.renderableNodes) {
+                    if (renderableNode.useSkinning) {
+                        const skin = renderableNode.node.getSkin();
+                        if (skin) {
+                            const inverseBindMatrices = (_b = skin.getInverseBindMatrices()) === null || _b === void 0 ? void 0 : _b.getArray();
+                            const joints = skin.listJoints();
+                            if (inverseBindMatrices && joints) {
+                                const jointIndices = new Uint16Array(joints.length);
+                                for (let i = 0; i < joints.length; i++) {
+                                    jointIndices[i] = joints[i].indexData.nodeIndex;
+                                }
+                                skinsToCache.push({
+                                    nodeIndex: renderableNode.node.indexData.nodeIndex,
+                                    inverseBindMatrices: new Float32Array(inverseBindMatrices),
+                                    jointIndices
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            // Cache everything in one call
+            await this.workerManager.cacheModel(modelId, {
+                nodes: modelData.nodeArray || [],
+                animations: modelData.animations || new Map(),
+                skins: skinsToCache
+            });
+        }
+        catch (error) {
+            console.error('[AnimationController] Failed to cache model in worker:', error);
+            throw error; // Re-throw to let caller know caching failed
+        }
     }
     fastSceneTraverse(scene, modelData, fcn) {
         // Use a stack for iterative traversal (faster than recursion)
@@ -15741,13 +15811,10 @@ class AnimationController {
         });
     }
     updateAnimation(instance, deltaTime) {
-        var _a;
+        var _a, _b;
         const animationState = instance.animationState;
         const currentAnimation = animationState.currentAnimation;
         const playing = animationState.playing;
-        // const currentTime = animationState.currentTime;
-        // const speed = animationState.speed;
-        // const loop = animationState.loop;
         if (!playing)
             return;
         if (currentAnimation === null)
@@ -15764,16 +15831,57 @@ class AnimationController {
         // Find maximum duration across all channels
         const maxDuration = this.maxDuration(animation);
         // Update animation time
-        instance.animationState.currentTime = this.updateTime(instance.animationState, deltaTime, maxDuration);
-        // TODO: This can be optimized by creating a version of this at the model level and copying it to the instance
+        const newTime = this.updateTime(instance.animationState, deltaTime, maxDuration);
+        instance.animationState.currentTime = newTime;
+        // Use worker for full animation pipeline if enabled
+        if (this.useWorker && this.workerManager) {
+            // Check if model is ready in worker
+            if (this.workerManager.isModelReady(instance.instanceId.modelId)) {
+                // Fire-and-forget request with callback
+                this.workerManager.requestAnimation(instance.instanceId.id, instance.instanceId.modelId, currentAnimation, newTime, animationState.loop, ((_a = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _a === void 0 ? void 0 : _a.length) > 0, (result) => {
+                    // Apply results when they arrive
+                    this.applyWorkerResults(instance, result, modelData);
+                    this.updateInstanceCache(instance);
+                });
+                // Return immediately - worker will handle it
+                return;
+            }
+            // If not ready yet, fall through to main thread
+        }
+        // Main thread fallback
         this.updateNodeLocalTransforms(instance);
-        // Update node transforms from animation
         this.updateNodeAnimationTransforms(instance, animation);
-        // Update node hierarchy transforms
         this.updateNodeHierarchyTransforms(instance);
-        // Update bone matrices if skinning
-        if (((_a = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _a === void 0 ? void 0 : _a.length) > 0) {
+        if (((_b = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _b === void 0 ? void 0 : _b.length) > 0) {
             this.updateNodeSkinningMatrices(instance);
+        }
+    }
+    // Apply worker computation results to instance
+    applyWorkerResults(instance, result, modelData) {
+        var _a;
+        const { nodeTransforms, animationMatrices, boneMatricesMap } = result;
+        // Unpack node transforms (10 floats per node)
+        const nodeCount = nodeTransforms.length / 10;
+        for (let i = 0; i < nodeCount; i++) {
+            const offset = i * 10;
+            const transform = {
+                translation: nodeTransforms.slice(offset, offset + 3),
+                rotation: nodeTransforms.slice(offset + 3, offset + 7),
+                scale: nodeTransforms.slice(offset + 7, offset + 10)
+            };
+            instance.animationState.animationNodeTransforms.set(i, transform);
+        }
+        // Store animation matrices (16 floats per node)
+        for (let i = 0; i < nodeCount; i++) {
+            const matrix = animationMatrices.slice(i * 16, (i + 1) * 16);
+            instance.animationState.animationMatrices.set(i, matrix);
+        }
+        // Store bone matrices if present - using optimized Map format
+        if (boneMatricesMap && ((_a = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _a === void 0 ? void 0 : _a.length) > 0) {
+            // Direct map assignment - no unpacking needed
+            for (const [nodeIndex, boneMatrices] of boneMatricesMap) {
+                instance.animationState.boneMatrices.set(nodeIndex, boneMatrices);
+            }
         }
     }
     updateNodeHierarchyTransforms(instance) {
@@ -15866,6 +15974,20 @@ class AnimationController {
         const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
         if (!modelData)
             return;
+        const instanceId = instance.instanceId.id;
+        const currentTime = instance.animationState.currentTime;
+        const currentAnimation = instance.animationState.currentAnimation;
+        // Check cache first
+        const cache = this.instanceCache.get(instanceId);
+        if (cache &&
+            Math.abs(cache.lastComputedTime - currentTime) < 0.0001 &&
+            cache.lastAnimationName === currentAnimation) {
+            // Use cached bone matrices
+            for (const [nodeIndex, matrices] of cache.cachedBoneMatrices) {
+                instance.animationState.boneMatrices.set(nodeIndex, matrices);
+            }
+            return;
+        }
         // Collect all nodes with skins for bone calculation
         const nodesWithSkins = [];
         this.fastSceneTraverse(modelData.scene, modelData, node => {
@@ -15874,37 +15996,23 @@ class AnimationController {
                 nodesWithSkins.push(node);
             }
         });
-        // Update bones
-        if (this.useWorker && this.workerManager) {
-            // Fire and forget - start worker calculation
-            this.updateBoneMatricesAsync(nodesWithSkins, instance);
+        // Always use main thread for bone calculation when not using COMPUTE_ANIMATION
+        // (COMPUTE_ANIMATION already handles bones efficiently)
+        for (const node of nodesWithSkins) {
+            this.updateBoneMatricesSync(node, instance);
         }
-        else {
-            // Sync path for main thread
-            for (const node of nodesWithSkins) {
-                this.updateBoneMatricesSync(node, instance);
-            }
-        }
+        // Cache the results
+        this.updateInstanceCache(instance);
     }
-    // Fire-and-forget async bone calculation
-    async updateBoneMatricesAsync(nodes, instance) {
-        // Process all nodes (results will be used next frame)
-        for (const node of nodes) {
-            try {
-                await this.updateBoneMatricesWorker(node, instance);
-            }
-            catch (error) {
-                // Check if it's just the worker not ready yet - this is expected during startup
-                if (error instanceof Error && error.message === 'AnimationWorker not ready') {
-                    // Just skip animation update until worker is ready
-                    return;
-                }
-                else {
-                    // Log other errors
-                    console.error('[AnimationController] Worker calculation failed:', error);
-                }
-            }
-        }
+    // Update instance cache with current bone matrices
+    updateInstanceCache(instance) {
+        const instanceId = instance.instanceId.id;
+        const cache = {
+            lastComputedTime: instance.animationState.currentTime,
+            lastAnimationName: instance.animationState.currentAnimation,
+            cachedBoneMatrices: new Map(instance.animationState.boneMatrices)
+        };
+        this.instanceCache.set(instanceId, cache);
     }
     // Synchronous bone calculation for main thread
     updateBoneMatricesSync(node, instance) {
@@ -15926,47 +16034,6 @@ class AnimationController {
         }
         // Always use main thread for sync version
         this.updateBoneMatricesMainThread(node, instance, skinJoints, inverseBindMatrices);
-    }
-    // Asynchronous bone calculation using worker
-    async updateBoneMatricesWorker(node, instance) {
-        var _a;
-        const skin = node.getSkin();
-        if (!skin)
-            return;
-        const skinJoints = skin === null || skin === void 0 ? void 0 : skin.listJoints();
-        if (!skinJoints)
-            return;
-        const extendedNode = node;
-        const inverseBindMatrices = (_a = skin.getInverseBindMatrices()) === null || _a === void 0 ? void 0 : _a.getArray();
-        if (!inverseBindMatrices)
-            return;
-        const animationMatrices = instance.animationState.animationMatrices;
-        // Prepare data for worker - only send joint matrices (KISS optimization)
-        const jointMatrices = new Float32Array(skinJoints.length * 16);
-        // Copy only joint matrices
-        for (let i = 0; i < skinJoints.length; i++) {
-            const jointNode = skinJoints[i];
-            const jointMatrix = animationMatrices.get(jointNode.indexData.nodeIndex);
-            if (jointMatrix) {
-                jointMatrices.set(jointMatrix, i * 16);
-            }
-        }
-        // Also need the skinned node's matrix
-        const nodeMatrix = animationMatrices.get(extendedNode.indexData.nodeIndex);
-        const nodeMatrixArray = nodeMatrix ? new Float32Array(nodeMatrix) : new Float32Array(16);
-        // Combine into single array: [nodeMatrix, ...jointMatrices]
-        const nodeMatrices = new Float32Array(nodeMatrixArray.length + jointMatrices.length);
-        nodeMatrices.set(nodeMatrixArray, 0);
-        nodeMatrices.set(jointMatrices, 16);
-        // Get joint indices
-        const jointIndices = new Uint16Array(skinJoints.length);
-        for (let i = 0; i < skinJoints.length; i++) {
-            jointIndices[i] = skinJoints[i].indexData.nodeIndex;
-        }
-        // Calculate using worker
-        const boneMatrices = await this.workerManager.calculateBoneMatrices(instance.instanceId.id, instance.instanceId.modelId, extendedNode.indexData.nodeIndex, nodeMatrices, inverseBindMatrices, jointIndices);
-        // Store result (will be used in next frame)
-        instance.animationState.boneMatrices.set(extendedNode.indexData.nodeIndex, boneMatrices);
     }
     // DRY - Extract main thread logic to separate method
     updateBoneMatricesMainThread(node, instance, skinJoints, inverseBindMatrices) {
@@ -16068,12 +16135,15 @@ class AnimationController {
         animationState.speed = (_a = options === null || options === void 0 ? void 0 : options.speed) !== null && _a !== void 0 ? _a : 1;
         animationState.loop = (_b = options === null || options === void 0 ? void 0 : options.loop) !== null && _b !== void 0 ? _b : true;
         animationState.playing = true;
-        //animationState.animationMatrices.clear();
+        // Invalidate cache for this instance
+        this.instanceCache.delete(instance.instanceId.id);
     }
     stopAnimation(instance) {
         instance.animationState.playing = false;
         instance.animationState.currentAnimation = null;
         instance.animationState.currentTime = 0;
+        // Invalidate cache for this instance
+        this.instanceCache.delete(instance.instanceId.id);
     }
 }
 
@@ -16991,6 +17061,7 @@ class InstanceManager {
         this.nextInstanceId = 1;
         this.dirtyInstances = new Set();
         this.lastRenderTick = -1;
+        this.cachedModelsInWorker = new Set();
         this.gl = gl;
         this.modelLoader = modelLoader;
         this._animationController = new AnimationController(modelLoader);
@@ -17047,6 +17118,12 @@ class InstanceManager {
         if (!modelData) {
             throw this.createError(ModelErrorCode.RESOURCE_NOT_FOUND, `Model ${modelId} not found`);
         }
+        // Cache model in worker if not already cached (only once per model)
+        // Note: This is async but we don't await it to avoid blocking instance creation
+        // The first animation frame might fall back to main thread while caching completes
+        this.cacheModelInWorkerIfNeeded(modelId).catch(error => {
+            console.error(`[InstanceManager] Failed to cache model ${modelId}:`, error);
+        });
         // Create instance data
         const instanceId = {
             id: this.nextInstanceId++,
@@ -17438,6 +17515,24 @@ class InstanceManager {
     setUseAnimationWorker(enabled) {
         console.log(`[InstanceManager] setUseAnimationWorker called with enabled=${enabled}`);
         this._animationController.setUseWorker(enabled);
+    }
+    async cacheModelInWorkerIfNeeded(modelId) {
+        // Only cache once per model
+        if (this.cachedModelsInWorker.has(modelId)) {
+            return;
+        }
+        // Mark as cached (even if it fails, to avoid repeated attempts)
+        this.cachedModelsInWorker.add(modelId);
+        // Cache the model data in the worker
+        try {
+            await this._animationController.cacheModelInWorker(modelId);
+            console.log(`[InstanceManager] Cached model ${modelId} in worker`);
+        }
+        catch (error) {
+            console.error(`[InstanceManager] Failed to cache model ${modelId} in worker:`, error);
+            // Remove from cache set so it can be retried
+            this.cachedModelsInWorker.delete(modelId);
+        }
     }
     /**
      * Gets the shadow map manager instance.

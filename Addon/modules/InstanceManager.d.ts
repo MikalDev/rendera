@@ -18,6 +18,7 @@ export declare class InstanceManager implements IInstanceManager {
     private nextInstanceId;
     private dirtyInstances;
     private lastRenderTick;
+    private cachedModelsInWorker;
     private _animationController;
     constructor(gl: WebGL2RenderingContext, modelLoader: ModelLoader, gpuResources: IGPUResourceManager);
     initialize(): void;
@@ -60,6 +61,7 @@ export declare class InstanceManager implements IInstanceManager {
     setModelNormalMapEnabled(enabled: boolean, instance: Model): void;
     setDebugShadowMap(enabled: boolean): void;
     setUseAnimationWorker(enabled: boolean): void;
+    private cacheModelInWorkerIfNeeded;
     /**
      * Gets the shadow map manager instance.
      * @returns The shadow map manager

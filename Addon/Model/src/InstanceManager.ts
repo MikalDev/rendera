@@ -26,6 +26,7 @@ export class InstanceManager implements IInstanceManager {
     private nextInstanceId = 1;
     private dirtyInstances: Set<number> = new Set();
     private lastRenderTick = -1;
+    private cachedModelsInWorker: Set<string> = new Set();
 
     private _animationController: AnimationController;
 
@@ -114,6 +115,13 @@ export class InstanceManager implements IInstanceManager {
                 `Model ${modelId} not found`
             );
         }
+        
+        // Cache model in worker if not already cached (only once per model)
+        // Note: This is async but we don't await it to avoid blocking instance creation
+        // The first animation frame might fall back to main thread while caching completes
+        this.cacheModelInWorkerIfNeeded(modelId).catch(error => {
+            console.error(`[InstanceManager] Failed to cache model ${modelId}:`, error);
+        });
 
         // Create instance data
         const instanceId: InstanceId = {
@@ -124,11 +132,11 @@ export class InstanceManager implements IInstanceManager {
             if (modelData.animations.size > 0) {
                 if (!animationName || !modelData.animations.has(animationName)) {
                     const firstAnimation = modelData.animations.keys().next().value;
-                animationName = firstAnimation;
+                    animationName = firstAnimation;
+                }
+            } else {
+                animationName = undefined;
             }
-        } else {
-            animationName = undefined;
-        }
 
         const instanceData: InstanceData = {
             instanceId,
@@ -607,6 +615,26 @@ export class InstanceManager implements IInstanceManager {
     public setUseAnimationWorker(enabled: boolean): void {
         console.log(`[InstanceManager] setUseAnimationWorker called with enabled=${enabled}`);
         this._animationController.setUseWorker(enabled);
+    }
+    
+    private async cacheModelInWorkerIfNeeded(modelId: string): Promise<void> {
+        // Only cache once per model
+        if (this.cachedModelsInWorker.has(modelId)) {
+            return;
+        }
+        
+        // Mark as cached (even if it fails, to avoid repeated attempts)
+        this.cachedModelsInWorker.add(modelId);
+        
+        // Cache the model data in the worker
+        try {
+            await this._animationController.cacheModelInWorker(modelId);
+            console.log(`[InstanceManager] Cached model ${modelId} in worker`);
+        } catch (error) {
+            console.error(`[InstanceManager] Failed to cache model ${modelId} in worker:`, error);
+            // Remove from cache set so it can be retried
+            this.cachedModelsInWorker.delete(modelId);
+        }
     }
 
     /**
