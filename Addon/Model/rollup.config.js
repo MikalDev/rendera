@@ -31,63 +31,23 @@ const dtsReferencePlugin = () => ({
   }
 });
 
-export default [
+export default {
   // Main module build
-  {
-    input: 'src/main.ts',
-    output: {
-      file: 'dist/index.js',
-      format: 'es',
-      name: 'Rendra'
-    },
-    plugins: [
-      resolve(),
-      typescript({
-        tsconfig: './tsconfig.json',
-        declarationDir: './dist',
-        compilerOptions: {
-          emitDeclarationOnly: true
-        }
-      }),
-      dtsReferencePlugin()
-    ]
+  input: 'src/main.ts',
+  output: {
+    file: 'dist/index.js',
+    format: 'es',
+    name: 'Rendra'
   },
-  // Worker build (KISS - simple IIFE format for workers)
-  {
-    input: 'src/workers/AnimationWorker.ts',
-    output: {
-      file: 'dist/workers/AnimationWorker.js',
-      format: 'iife',
-      name: 'AnimationWorker'
-    },
-    plugins: [
-      resolve(),
-      typescript({
-        tsconfig: './tsconfig.json',
-        compilerOptions: {
-          emitDeclarationOnly: false,
-          declaration: false
-        }
-      })
-    ]
-  },
-  // Simple worker build for debugging
-  {
-    input: 'src/workers/AnimationWorkerSimple.ts',
-    output: {
-      file: 'dist/workers/AnimationWorkerSimple.js',
-      format: 'iife',
-      name: 'AnimationWorkerSimple'
-    },
-    plugins: [
-      resolve(),
-      typescript({
-        tsconfig: './tsconfig.json',
-        compilerOptions: {
-          emitDeclarationOnly: false,
-          declaration: false
-        }
-      })
-    ]
-  }
-];
+  plugins: [
+    resolve(),
+    typescript({
+      tsconfig: './tsconfig.json',
+      declarationDir: './dist',
+      compilerOptions: {
+        emitDeclarationOnly: true
+      }
+    }),
+    dtsReferencePlugin()
+  ]
+};

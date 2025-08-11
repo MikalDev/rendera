@@ -1,29 +1,8 @@
 // AnimationWorker.ts - Handles animation calculations in a web worker
 /// <reference lib="webworker" />
 
-// Import gl-matrix
-try {
-    const workerPath = self.location.href;
-    const baseUrl = workerPath.substring(0, workerPath.lastIndexOf('/workers/'));
-    const glMatrixPath = baseUrl + '/gl-matrix-umd.js';
-    importScripts(glMatrixPath);
-} catch (e) {
-    // Try relative path as fallback
-    try {
-        importScripts('../gl-matrix-umd.js');
-    } catch (e2) {
-        throw new Error('Could not load gl-matrix library');
-    }
-}
-
-// Get gl-matrix types from global scope
-declare const glMatrix: any;
-
-// Extract the modules we need from glMatrix
-const mat4 = glMatrix.mat4;
-const vec3 = glMatrix.vec3;
-const vec4 = glMatrix.vec4;
-const quat = glMatrix.quat;
+// Import gl-matrix as ES modules - will be bundled by Rollup
+import { mat4, vec3, vec4, quat } from 'gl-matrix';
 
 // Unified model caching request - sends ALL model data at once
 interface CacheModelRequest {

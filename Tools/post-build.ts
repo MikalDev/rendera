@@ -9,8 +9,7 @@ try {
         "plugin.js",
         "type.js",
         "instance.js",
-        "c3runtime/modules/index.js",
-        "c3runtime/modules/gl-matrix.js"
+        "c3runtime/modules/index.js"
     ];
 
     // Reorder the file-list array
@@ -25,9 +24,7 @@ try {
         "c3runtime/conditions.js",
         "c3runtime/modules/index.js",
         "c3runtime/modules/gl-matrix.js",
-        "c3runtime/modules/gl-matrix-umd.js",
         "c3runtime/modules/workers/AnimationWorker.js",
-        "c3runtime/modules/workers/AnimationWorkerSimple.js",
         "lang/en-US.json",
         "instance.js",
         "type.js",

@@ -34,70 +34,15 @@ export class AnimationWorkerManager {
         }
         
         try {
-            // Determine the worker URL based on context
-            let workerUrl = 'c3runtime/modules/workers/AnimationWorker.js';
+            // Simple worker URL resolution - relative to the HTML page
+            // In export: HTML is at root, worker at scripts/plugins/rendera/c3runtime/modules/workers/
+            // In preview: different structure, needs absolute path
+            let workerUrl = 'scripts/plugins/rendera/c3runtime/modules/workers/AnimationWorker.js';
             
-            // Check if we're running in a worker context
-            if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
-                // When creating a worker from within a worker, URLs are relative to the worker's location
-                workerUrl = new URL('./workers/AnimationWorker.js', self.location.href).href;
-            } else if (typeof window !== 'undefined') {
-                
-                // Check if we're in Construct preview
-                if (window.location.hostname.includes('preview.construct.net')) {
-                    
-                    // Get the current script path from the stack trace or document
-                    let scriptPath = '';
-                    try {
-                        // Try to get script path from error stack
-                        const err = new Error();
-                        const stack = err.stack || '';
-                        const match = stack.match(/https?:\/\/[^)]+\.js/);
-                        if (match) {
-                            scriptPath = new URL(match[0]).pathname;
-                        }
-                    } catch (e) {
-                        // Ignore
-                    }
-                    
-                    // If we couldn't get it from stack, try looking for our script in the document
-                    if (!scriptPath) {
-                        const scripts = Array.from(document.getElementsByTagName('script'));
-                        const ourScript = scripts.find(s => s.src.includes('rendera') && s.src.includes('index.js'));
-                        if (ourScript) {
-                            scriptPath = new URL(ourScript.src).pathname;
-                        }
-                    }
-                    
-                    // The script is at /scripts/plugins/rendera/c3runtime/modules/index.js
-                    // So worker should be at /scripts/plugins/rendera/c3runtime/modules/workers/AnimationWorker.js
-                    // Extract the base path up to and including 'rendera/'
-                    const pathMatch = scriptPath.match(/^(.*\/rendera\/)/);
-                    if (pathMatch) {
-                        const basePath = pathMatch[1];
-                        workerUrl = `${basePath}c3runtime/modules/workers/AnimationWorker.js`;
-                    } else {
-                        // Try another approach - get everything before c3runtime
-                        const altMatch = scriptPath.match(/^(.*\/)c3runtime\//);
-                        if (altMatch) {
-                            const basePath = altMatch[1];
-                            workerUrl = `${basePath}c3runtime/modules/workers/AnimationWorker.js`;
-                        } else {
-                            // Fallback
-                            workerUrl = 'c3runtime/modules/workers/AnimationWorker.js';
-                        }
-                    }
-                } else {
-                    // Local development
-                    const isDeveloperMode = window.location.protocol === 'file:' || 
-                                           window.location.hostname === 'localhost' ||
-                                           window.location.hostname === '127.0.0.1';
-                    
-                    if (isDeveloperMode) {
-                        const baseUrl = new URL('./', window.location.href).href;
-                        workerUrl = new URL('c3runtime/modules/workers/AnimationWorker.js', baseUrl).href;
-                    }
-                }
+            // Check if we're in Construct preview/editor  
+            if (typeof window !== 'undefined' && window.location.hostname.includes('construct.net')) {
+                // In preview, needs absolute path
+                workerUrl = '/scripts/plugins/rendera/c3runtime/modules/workers/AnimationWorker.js';
             }
             
             

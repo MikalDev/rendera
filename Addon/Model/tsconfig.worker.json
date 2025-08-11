@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "es2018",
+    "lib": ["es2018", "webworker"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": false,
+    "declarationMap": false,
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "allowJs": false,
+    "baseUrl": ".",
+    "skipLibCheck": true,
+    "isolatedModules": true
+  },
+  "include": ["src/workers/*.ts"],
+  "exclude": ["node_modules"]
+}
