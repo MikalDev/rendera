@@ -228,7 +228,7 @@ export declare class ShadowMapManager {
     private endShadowMapFrame;
     /**
      * Renders shadow maps for all enabled lights.
-     * Caches GL state once at the beginning and restores once at the end.
+     * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
      */
     renderAllShadowMaps(instanceManager: InstanceManager): void;
@@ -296,6 +296,12 @@ export declare class ShadowMapManager {
      * @returns Map of lightId -> shadowMapIndex
      */
     getLightToShadowMapMapping(): Map<number, number>;
+    /**
+     * Checks if any lights are currently casting shadows.
+     * Useful for optimization decisions and debugging.
+     * @returns true if at least one enabled light is casting shadows
+     */
+    hasActiveShadows(): boolean;
     /**
      * Gets shadow data by shadow map index instead of light ID.
      * @param shadowMapIndex - The shadow map index (0-7)

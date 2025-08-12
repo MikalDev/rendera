@@ -652,6 +652,12 @@ export class ShadowMapManager {
      * @throws Error if the shadow map resources aren't initialized
      */
     renderShadowMap(lightId: number, instanceManager: InstanceManager): void {
+        // Check if the shadow map exists and is enabled
+        const shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData || !shadowData.light.enabled) {
+            return; // Skip disabled or non-existent shadow maps
+        }
+        
         // Cache GL state for single shadow map render
         this.beginShadowMapFrame();
         
@@ -767,10 +773,29 @@ export class ShadowMapManager {
 
     /**
      * Renders shadow maps for all enabled lights.
-     * Caches GL state once at the beginning and restores once at the end.
+     * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
      */
     renderAllShadowMaps(instanceManager: InstanceManager): void {
+        // Early exit if no shadow maps to render
+        if (this.shadowMaps.size === 0) {
+            return; // Skip entire shadow map stage including state store/restore
+        }
+        
+        // Check if any enabled lights need rendering
+        let hasEnabledShadows = false;
+        for (const [, shadowData] of this.shadowMaps) {
+            if (shadowData.light.enabled) {
+                hasEnabledShadows = true;
+                break;
+            }
+        }
+        
+        // Skip if no enabled shadow-casting lights
+        if (!hasEnabledShadows) {
+            return; // Bypass shadow state store/restore entirely
+        }
+        
         // Cache GL state once for all shadow maps
         this.beginShadowMapFrame();
         
@@ -1047,6 +1072,25 @@ export class ShadowMapManager {
      */
     getLightToShadowMapMapping(): Map<number, number> {
         return new Map(this.lightToShadowMapIndex);
+    }
+    
+    /**
+     * Checks if any lights are currently casting shadows.
+     * Useful for optimization decisions and debugging.
+     * @returns true if at least one enabled light is casting shadows
+     */
+    hasActiveShadows(): boolean {
+        if (this.shadowMaps.size === 0) {
+            return false;
+        }
+        
+        for (const [, shadowData] of this.shadowMaps) {
+            if (shadowData.light.enabled) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     /**

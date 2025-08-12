@@ -1,4 +1,4 @@
-import { InstanceData, IInstanceManager, IGPUResourceManager } from './types';
+import { InstanceData, IInstanceManager, IGPUResourceManager, AnimationEventCallback } from './types';
 import { ModelLoader } from './ModelLoader';
 import { Model } from './Model';
 import { AnimationController } from './AnimationController';
@@ -58,6 +58,8 @@ export declare class InstanceManager implements IInstanceManager {
     private cleanupInstance;
     setDebugShadowMap(enabled: boolean): void;
     setUseAnimationWorker(enabled: boolean): void;
+    registerAnimationCallback(instanceId: number, callback: AnimationEventCallback): void;
+    unregisterAnimationCallback(instanceId: number): void;
     private cacheModelInWorkerIfNeeded;
     /**
      * Gets the shadow map manager instance.

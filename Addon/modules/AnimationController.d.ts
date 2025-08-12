@@ -1,10 +1,13 @@
 import { ModelLoader } from './ModelLoader';
-import { InstanceData, AnimationOptions } from './types';
+import { InstanceData, AnimationOptions, AnimationEventCallback } from './types';
 export declare class AnimationController {
     private modelLoader;
     private useWorker;
     private workerManager;
     private instanceCache;
+    private animationCallbacks;
+    private previousAnimationTimes;
+    private previousAnimationNames;
     constructor(modelLoader: ModelLoader);
     setUseWorker(enabled: boolean): void;
     cacheModelInWorker(modelId: string): Promise<void>;
@@ -28,5 +31,8 @@ export declare class AnimationController {
     startAnimation(instance: InstanceData, animationName: string, options?: AnimationOptions): void;
     stopAnimation(instance: InstanceData): void;
     invalidateCache(instanceId: number): void;
+    registerAnimationCallback(instanceId: number, callback: AnimationEventCallback): void;
+    unregisterAnimationCallback(instanceId: number): void;
+    private fireAnimationEvent;
 }
 //# sourceMappingURL=AnimationController.d.ts.map

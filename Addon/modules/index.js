@@ -6795,6 +6795,15 @@ var TextureType;
     TextureType[TextureType["Occlusion"] = 3] = "Occlusion";
     TextureType[TextureType["Emissive"] = 4] = "Emissive";
 })(TextureType || (TextureType = {}));
+// Animation event system
+var AnimationEventType;
+(function (AnimationEventType) {
+    AnimationEventType["LOOP"] = "loop";
+    AnimationEventType["COMPLETE"] = "complete";
+    AnimationEventType["FRAME"] = "frame";
+    AnimationEventType["START"] = "start";
+    AnimationEventType["STOP"] = "stop";
+})(AnimationEventType || (AnimationEventType = {}));
 
 ///////////////////////////////////////////////////
 // KTX2 Header.
@@ -15845,6 +15854,9 @@ class AnimationController {
         this.useWorker = false;
         this.workerManager = null;
         this.instanceCache = new Map();
+        this.animationCallbacks = new Map();
+        this.previousAnimationTimes = new Map();
+        this.previousAnimationNames = new Map();
         this.modelLoader = modelLoader;
     }
     setUseWorker(enabled) {
@@ -15980,9 +15992,16 @@ class AnimationController {
     }
     updateAnimation(instance, deltaTime) {
         var _a, _b;
+        const instanceId = instance.instanceId.id;
         const animationState = instance.animationState;
         const currentAnimation = animationState.currentAnimation;
         const playing = animationState.playing;
+        // Check for animation start event
+        const previousAnimation = this.previousAnimationNames.get(instanceId);
+        if (currentAnimation && currentAnimation !== previousAnimation && playing) {
+            this.fireAnimationEvent(instanceId, AnimationEventType.START, currentAnimation, 0, 0, instance.instanceId.modelId);
+            this.previousAnimationNames.set(instanceId, currentAnimation);
+        }
         if (!playing)
             return;
         if (currentAnimation === null)
@@ -15999,7 +16018,7 @@ class AnimationController {
         // Find maximum duration across all channels
         const maxDuration = this.maxDuration(animation);
         // Update animation time
-        const newTime = this.updateTime(instance.animationState, deltaTime, maxDuration);
+        const newTime = this.updateTime(instance.animationState, deltaTime, maxDuration, instance.instanceId.id, currentAnimation, instance.instanceId.modelId);
         instance.animationState.currentTime = newTime;
         // Use worker for full animation pipeline if enabled
         if (this.useWorker && this.workerManager) {
@@ -16099,9 +16118,29 @@ class AnimationController {
         }
         return maxDuration;
     }
-    updateTime(state, deltaTime, duration) {
+    updateTime(state, deltaTime, duration, instanceId, animationName, modelId) {
+        var _a;
+        const previousTime = (_a = this.previousAnimationTimes.get(instanceId)) !== null && _a !== void 0 ? _a : 0;
         const newTime = state.currentTime + (deltaTime * state.speed);
-        return state.loop ? (newTime % duration) : Math.min(newTime, duration);
+        let finalTime;
+        if (state.loop) {
+            finalTime = newTime % duration;
+            // Detect loop
+            if (newTime >= duration && previousTime < duration) {
+                this.fireAnimationEvent(instanceId, AnimationEventType.LOOP, animationName, finalTime, duration, modelId);
+            }
+        }
+        else {
+            finalTime = Math.min(newTime, duration);
+            // Detect completion
+            if (finalTime >= duration && previousTime < duration) {
+                this.fireAnimationEvent(instanceId, AnimationEventType.COMPLETE, animationName, finalTime, duration, modelId);
+            }
+        }
+        // Always fire frame event
+        this.fireAnimationEvent(instanceId, AnimationEventType.FRAME, animationName, finalTime, duration, modelId);
+        this.previousAnimationTimes.set(instanceId, finalTime);
+        return finalTime;
     }
     updateNodeAnimationTransforms(instance, animation) {
         const animationState = instance.animationState;
@@ -16307,15 +16346,47 @@ class AnimationController {
         this.instanceCache.delete(instance.instanceId.id);
     }
     stopAnimation(instance) {
+        const previousAnimation = instance.animationState.currentAnimation;
         instance.animationState.playing = false;
         instance.animationState.currentAnimation = null;
         instance.animationState.currentTime = 0;
+        // Fire stop event if there was an animation playing
+        if (previousAnimation) {
+            this.fireAnimationEvent(instance.instanceId.id, AnimationEventType.STOP, previousAnimation, instance.animationState.currentTime, 0, instance.instanceId.modelId);
+        }
+        // Clear tracking for this instance
+        this.previousAnimationNames.delete(instance.instanceId.id);
+        this.previousAnimationTimes.delete(instance.instanceId.id);
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
     }
     // Public method to invalidate cache for a specific instance
     invalidateCache(instanceId) {
         this.instanceCache.delete(instanceId);
+    }
+    // Animation event callback registration
+    registerAnimationCallback(instanceId, callback) {
+        this.animationCallbacks.set(instanceId, callback);
+    }
+    unregisterAnimationCallback(instanceId) {
+        this.animationCallbacks.delete(instanceId);
+        this.previousAnimationTimes.delete(instanceId);
+        this.previousAnimationNames.delete(instanceId);
+    }
+    fireAnimationEvent(instanceId, eventType, animationName, currentTime, duration, modelId) {
+        const callback = this.animationCallbacks.get(instanceId);
+        if (!callback)
+            return;
+        const eventData = {
+            instanceId,
+            modelId,
+            animationName,
+            eventType,
+            currentTime,
+            duration,
+            progress: duration > 0 ? currentTime / duration : 0
+        };
+        callback(eventData);
     }
 }
 
@@ -16819,6 +16890,11 @@ class ShadowMapManager {
      * @throws Error if the shadow map resources aren't initialized
      */
     renderShadowMap(lightId, instanceManager) {
+        // Check if the shadow map exists and is enabled
+        const shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData || !shadowData.light.enabled) {
+            return; // Skip disabled or non-existent shadow maps
+        }
         // Cache GL state for single shadow map render
         this.beginShadowMapFrame();
         try {
@@ -16922,10 +16998,26 @@ class ShadowMapManager {
     }
     /**
      * Renders shadow maps for all enabled lights.
-     * Caches GL state once at the beginning and restores once at the end.
+     * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
      */
     renderAllShadowMaps(instanceManager) {
+        // Early exit if no shadow maps to render
+        if (this.shadowMaps.size === 0) {
+            return; // Skip entire shadow map stage including state store/restore
+        }
+        // Check if any enabled lights need rendering
+        let hasEnabledShadows = false;
+        for (const [, shadowData] of this.shadowMaps) {
+            if (shadowData.light.enabled) {
+                hasEnabledShadows = true;
+                break;
+            }
+        }
+        // Skip if no enabled shadow-casting lights
+        if (!hasEnabledShadows) {
+            return; // Bypass shadow state store/restore entirely
+        }
         // Cache GL state once for all shadow maps
         this.beginShadowMapFrame();
         try {
@@ -17170,6 +17262,22 @@ class ShadowMapManager {
      */
     getLightToShadowMapMapping() {
         return new Map(this.lightToShadowMapIndex);
+    }
+    /**
+     * Checks if any lights are currently casting shadows.
+     * Useful for optimization decisions and debugging.
+     * @returns true if at least one enabled light is casting shadows
+     */
+    hasActiveShadows() {
+        if (this.shadowMaps.size === 0) {
+            return false;
+        }
+        for (const [, shadowData] of this.shadowMaps) {
+            if (shadowData.light.enabled) {
+                return true;
+            }
+        }
+        return false;
     }
     /**
      * Gets shadow data by shadow map index instead of light ID.
@@ -17732,6 +17840,13 @@ class InstanceManager {
     setUseAnimationWorker(enabled) {
         console.log(`[InstanceManager] setUseAnimationWorker called with enabled=${enabled}`);
         this._animationController.setUseWorker(enabled);
+    }
+    // Animation event callback methods
+    registerAnimationCallback(instanceId, callback) {
+        this._animationController.registerAnimationCallback(instanceId, callback);
+    }
+    unregisterAnimationCallback(instanceId) {
+        this._animationController.unregisterAnimationCallback(instanceId);
     }
     async cacheModelInWorkerIfNeeded(modelId) {
         // Only cache once per model

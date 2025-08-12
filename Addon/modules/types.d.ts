@@ -168,6 +168,23 @@ export interface AnimationOptions {
     blendDuration?: number;
 }
 export type BufferUsage = WebGL2RenderingContext['STATIC_DRAW'] | WebGL2RenderingContext['DYNAMIC_DRAW'];
+export declare enum AnimationEventType {
+    LOOP = "loop",
+    COMPLETE = "complete",
+    FRAME = "frame",
+    START = "start",
+    STOP = "stop"
+}
+export interface AnimationEventData {
+    instanceId: number;
+    modelId: string;
+    animationName: string;
+    eventType: AnimationEventType;
+    currentTime: number;
+    duration: number;
+    progress: number;
+}
+export type AnimationEventCallback = (data: AnimationEventData) => void;
 export interface IGPUResourceManager {
     createBuffer(data: BufferSource, usage: BufferUsage): WebGLBuffer;
     createTexture(image: ImageData | HTMLImageElement | ImageBitmap): WebGLTexture;
