@@ -157,6 +157,23 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	public getUseAnimationWorker(): boolean {
 		return this._useAnimationWorker;
 	}
+	
+	// Animation event callback API for Rendera-Control
+	public registerAnimationCallback(instanceId: number, callback: any): void {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot register animation callback - instanceManager not initialized');
+			return;
+		}
+		this.instanceManager.registerAnimationCallback(instanceId, callback);
+	}
+	
+	public unregisterAnimationCallback(instanceId: number): void {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot unregister animation callback - instanceManager not initialized');
+			return;
+		}
+		this.instanceManager.unregisterAnimationCallback(instanceId);
+	}
 };
 
 /** Important to save export type for Typescript compiler */

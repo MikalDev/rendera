@@ -1,6 +1,6 @@
 // src/AnimationController.ts
 import { ModelLoader } from './ModelLoader';
-import { InstanceData, AnimationOptions, AnimationState, ExtendedNode } from './types';
+import { InstanceData, AnimationOptions, AnimationState, ExtendedNode, AnimationEventCallback, AnimationEventType, AnimationEventData } from './types';
 import { mat4, quat, vec3, vec4 } from 'gl-matrix';
 import { Scene, Animation, Node, TypedArray } from '@gltf-transform/core';
 import { AnimationWorkerManager } from './AnimationWorkerManager';
@@ -16,6 +16,9 @@ export class AnimationController {
     private useWorker: boolean = false;
     private workerManager: AnimationWorkerManager | null = null;
     private instanceCache = new Map<number, InstanceAnimationCache>();
+    private animationCallbacks: Map<number, AnimationEventCallback> = new Map();
+    private previousAnimationTimes: Map<number, number> = new Map();
+    private previousAnimationNames: Map<number, string | null> = new Map();
     
     constructor(private modelLoader: ModelLoader) {
         this.modelLoader = modelLoader;
@@ -176,9 +179,24 @@ export class AnimationController {
     }
 
     updateAnimation(instance: InstanceData, deltaTime: number): void {
+        const instanceId = instance.instanceId.id;
         const animationState = instance.animationState;
         const currentAnimation = animationState.currentAnimation;
         const playing = animationState.playing;
+        
+        // Check for animation start event
+        const previousAnimation = this.previousAnimationNames.get(instanceId);
+        if (currentAnimation && currentAnimation !== previousAnimation && playing) {
+            this.fireAnimationEvent(
+                instanceId,
+                AnimationEventType.START,
+                currentAnimation,
+                0,
+                0,
+                instance.instanceId.modelId
+            );
+            this.previousAnimationNames.set(instanceId, currentAnimation);
+        }
 
         if (!playing) return;
         if (currentAnimation === null) return;
@@ -199,7 +217,10 @@ export class AnimationController {
         const newTime = this.updateTime(
             instance.animationState,
             deltaTime,
-            maxDuration
+            maxDuration,
+            instance.instanceId.id,
+            currentAnimation,
+            instance.instanceId.modelId
         );
         instance.animationState.currentTime = newTime;
 
@@ -323,10 +344,58 @@ export class AnimationController {
     private updateTime(
         state: AnimationState, 
         deltaTime: number, 
-        duration: number
+        duration: number,
+        instanceId: number,
+        animationName: string,
+        modelId: string
     ): number {
+        const previousTime = this.previousAnimationTimes.get(instanceId) ?? 0;
         const newTime = state.currentTime + (deltaTime * state.speed);
-        return state.loop ? (newTime % duration) : Math.min(newTime, duration);
+        
+        let finalTime: number;
+        
+        if (state.loop) {
+            finalTime = newTime % duration;
+            
+            // Detect loop
+            if (newTime >= duration && previousTime < duration) {
+                this.fireAnimationEvent(
+                    instanceId,
+                    AnimationEventType.LOOP,
+                    animationName,
+                    finalTime,
+                    duration,
+                    modelId
+                );
+            }
+        } else {
+            finalTime = Math.min(newTime, duration);
+            
+            // Detect completion
+            if (finalTime >= duration && previousTime < duration) {
+                this.fireAnimationEvent(
+                    instanceId,
+                    AnimationEventType.COMPLETE,
+                    animationName,
+                    finalTime,
+                    duration,
+                    modelId
+                );
+            }
+        }
+        
+        // Always fire frame event
+        this.fireAnimationEvent(
+            instanceId,
+            AnimationEventType.FRAME,
+            animationName,
+            finalTime,
+            duration,
+            modelId
+        );
+        
+        this.previousAnimationTimes.set(instanceId, finalTime);
+        return finalTime;
     }
 
     private updateNodeAnimationTransforms(
@@ -596,9 +665,27 @@ export class AnimationController {
     }
 
     stopAnimation(instance: InstanceData): void {
+        const previousAnimation = instance.animationState.currentAnimation;
+        
         instance.animationState.playing = false;
         instance.animationState.currentAnimation = null;
         instance.animationState.currentTime = 0;
+        
+        // Fire stop event if there was an animation playing
+        if (previousAnimation) {
+            this.fireAnimationEvent(
+                instance.instanceId.id,
+                AnimationEventType.STOP,
+                previousAnimation,
+                instance.animationState.currentTime,
+                0,
+                instance.instanceId.modelId
+            );
+        }
+        
+        // Clear tracking for this instance
+        this.previousAnimationNames.delete(instance.instanceId.id);
+        this.previousAnimationTimes.delete(instance.instanceId.id);
         
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
@@ -607,5 +694,40 @@ export class AnimationController {
     // Public method to invalidate cache for a specific instance
     public invalidateCache(instanceId: number): void {
         this.instanceCache.delete(instanceId);
+    }
+    
+    // Animation event callback registration
+    public registerAnimationCallback(instanceId: number, callback: AnimationEventCallback): void {
+        this.animationCallbacks.set(instanceId, callback);
+    }
+    
+    public unregisterAnimationCallback(instanceId: number): void {
+        this.animationCallbacks.delete(instanceId);
+        this.previousAnimationTimes.delete(instanceId);
+        this.previousAnimationNames.delete(instanceId);
+    }
+    
+    private fireAnimationEvent(
+        instanceId: number,
+        eventType: AnimationEventType,
+        animationName: string,
+        currentTime: number,
+        duration: number,
+        modelId: string
+    ): void {
+        const callback = this.animationCallbacks.get(instanceId);
+        if (!callback) return;
+        
+        const eventData: AnimationEventData = {
+            instanceId,
+            modelId,
+            animationName,
+            eventType,
+            currentTime,
+            duration,
+            progress: duration > 0 ? currentTime / duration : 0
+        };
+        
+        callback(eventData);
     }
 }

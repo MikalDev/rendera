@@ -1,5 +1,5 @@
 import { ModelError, ModelErrorCode } from './errors';
-import { InstanceData, IInstanceManager, IGPUResourceManager, InstanceId, type AnimationOptions, MAX_BONES, NodeTransforms } from './types';
+import { InstanceData, IInstanceManager, IGPUResourceManager, InstanceId, type AnimationOptions, MAX_BONES, NodeTransforms, AnimationEventCallback } from './types';
 import { ModelLoader } from './ModelLoader';
 import { Model } from './Model';
 import { AnimationController } from './AnimationController';
@@ -591,6 +591,15 @@ export class InstanceManager implements IInstanceManager {
     public setUseAnimationWorker(enabled: boolean): void {
         console.log(`[InstanceManager] setUseAnimationWorker called with enabled=${enabled}`);
         this._animationController.setUseWorker(enabled);
+    }
+    
+    // Animation event callback methods
+    public registerAnimationCallback(instanceId: number, callback: AnimationEventCallback): void {
+        this._animationController.registerAnimationCallback(instanceId, callback);
+    }
+    
+    public unregisterAnimationCallback(instanceId: number): void {
+        this._animationController.unregisterAnimationCallback(instanceId);
     }
     
     private async cacheModelInWorkerIfNeeded(modelId: string): Promise<void> {

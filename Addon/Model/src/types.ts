@@ -227,6 +227,27 @@ export interface AnimationOptions {
 
 export type BufferUsage = WebGL2RenderingContext['STATIC_DRAW'] | WebGL2RenderingContext['DYNAMIC_DRAW'];
 
+// Animation event system
+export enum AnimationEventType {
+    LOOP = 'loop',
+    COMPLETE = 'complete',
+    FRAME = 'frame',
+    START = 'start',
+    STOP = 'stop'
+}
+
+export interface AnimationEventData {
+    instanceId: number;
+    modelId: string;
+    animationName: string;
+    eventType: AnimationEventType;
+    currentTime: number;
+    duration: number;
+    progress: number; // 0-1
+}
+
+export type AnimationEventCallback = (data: AnimationEventData) => void;
+
 // GPU resource management
 export interface IGPUResourceManager {
     createBuffer(data: BufferSource, usage: BufferUsage): WebGLBuffer;
