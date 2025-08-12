@@ -17215,6 +17215,84 @@ ShadowMapManager.DEFAULT_BOUNDS = {
     max: fromValues(1000, 1000, 1000)
 };
 
+/**
+ * Manages uniform location caching for WebGL shader programs.
+ * Automatically caches uniform locations on first access and provides
+ * invalidation mechanisms for shader recompilation.
+ *
+ * This class follows SOLID principles and reduces repeated GL calls
+ * by caching uniform locations per shader program.
+ */
+class ShaderUniformCache {
+    constructor(gl) {
+        this.gl = gl;
+        this.cache = new Map();
+    }
+    /**
+     * Gets a uniform location, using cache if available.
+     * @param program - The shader program
+     * @param uniformName - Name of the uniform
+     * @returns The uniform location or null if not found
+     */
+    getLocation(program, uniformName) {
+        // Get or create program cache
+        if (!this.cache.has(program)) {
+            this.cache.set(program, new Map());
+        }
+        const programCache = this.cache.get(program);
+        // Get or query uniform location
+        if (!programCache.has(uniformName)) {
+            const location = this.gl.getUniformLocation(program, uniformName);
+            programCache.set(uniformName, location);
+        }
+        return programCache.get(uniformName);
+    }
+    /**
+     * Gets multiple uniform locations at once.
+     * Useful for initializing a set of commonly used uniforms.
+     * @param program - The shader program
+     * @param uniformNames - Array of uniform names
+     * @returns Map of uniform names to locations
+     */
+    getLocations(program, uniformNames) {
+        const locations = new Map();
+        for (const name of uniformNames) {
+            locations.set(name, this.getLocation(program, name));
+        }
+        return locations;
+    }
+    /**
+     * Invalidates cache for a specific program.
+     * Call this when a shader is recompiled or deleted.
+     * @param program - The shader program to invalidate
+     */
+    invalidateProgram(program) {
+        this.cache.delete(program);
+    }
+    /**
+     * Clears the entire cache.
+     * Call this on context loss or reset.
+     */
+    clear() {
+        this.cache.clear();
+    }
+    /**
+     * Gets the number of cached programs.
+     * Useful for debugging and monitoring.
+     */
+    getCachedProgramCount() {
+        return this.cache.size;
+    }
+    /**
+     * Gets the number of cached uniforms for a program.
+     * @param program - The shader program
+     */
+    getCachedUniformCount(program) {
+        var _a, _b;
+        return (_b = (_a = this.cache.get(program)) === null || _a === void 0 ? void 0 : _a.size) !== null && _b !== void 0 ? _b : 0;
+    }
+}
+
 class InstanceManager {
     constructor(gl, modelLoader, gpuResources) {
         this.gpuResources = gpuResources;
@@ -17234,6 +17312,8 @@ class InstanceManager {
         this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
         this.shadowMapManager.initialize(2048);
         this.shadowMapShader = this.gpuResources.getShadowMapShader();
+        // Initialize uniform cache
+        this.uniformCache = new ShaderUniformCache(gl);
     }
     initialize() {
         // Log WebGL context attributes
@@ -17490,16 +17570,15 @@ class InstanceManager {
                     this.gl.useProgram(shader);
                     // 2. Bind VAO (contains vertex attributes setup)
                     this.gl.bindVertexArray(primitive.vao);
-                    // 3. Set required uniforms
-                    const viewLoc = this.gl.getUniformLocation(shader, 'u_View');
-                    const projectionLoc = this.gl.getUniformLocation(shader, 'u_Projection');
-                    const modelMatrixLoc = this.gl.getUniformLocation(shader, 'u_Model');
-                    const normalMatrixLoc = this.gl.getUniformLocation(shader, 'u_NormalMatrix');
-                    const nodeMatrixLoc = this.gl.getUniformLocation(shader, 'u_NodeMatrix');
-                    const useSkinningLoc = this.gl.getUniformLocation(shader, 'u_UseSkinning');
+                    // 3. Set required uniforms using cached locations
+                    const viewLoc = this.uniformCache.getLocation(shader, 'u_View');
+                    const projectionLoc = this.uniformCache.getLocation(shader, 'u_Projection');
+                    const modelLoc = this.uniformCache.getLocation(shader, 'u_Model');
+                    const nodeMatrixLoc = this.uniformCache.getLocation(shader, 'u_NodeMatrix');
+                    const useSkinningLoc = this.uniformCache.getLocation(shader, 'u_UseSkinning');
                     this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
                     this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
-                    this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
+                    this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;
                     const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
@@ -17532,6 +17611,7 @@ class InstanceManager {
                     else {
                         normalFromMat4(normalMatrix, instance.worldMatrix);
                     }
+                    const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
                     this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);
                     // 5. Bind material properties (textures and uniforms)
                     this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, primitive.material, modelData);
@@ -17575,15 +17655,15 @@ class InstanceManager {
                 for (const primitive of mesh.primitives) {
                     // 1. Bind VAO
                     this.gl.bindVertexArray(primitive.vao);
-                    // 2. Set minimal required uniforms for shadow mapping
-                    const viewProjLoc = this.gl.getUniformLocation(shadowShader, 'u_LightViewProjection');
-                    const modelMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_Model');
-                    const nodeMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_NodeMatrix');
-                    const useSkinningLoc = this.gl.getUniformLocation(shadowShader, 'u_UseSkinning');
+                    // 2. Set minimal required uniforms for shadow mapping using cached locations
+                    const viewProjLoc = this.uniformCache.getLocation(shadowShader, 'u_LightViewProjection');
+                    const modelLoc = this.uniformCache.getLocation(shadowShader, 'u_Model');
+                    const nodeMatrixLoc = this.uniformCache.getLocation(shadowShader, 'u_NodeMatrix');
+                    const useSkinningLoc = this.uniformCache.getLocation(shadowShader, 'u_UseSkinning');
                     // Combine view and projection for efficiency
                     const lightViewProj = multiply(create$3(), viewProjection.projection, viewProjection.view);
                     this.gl.uniformMatrix4fv(viewProjLoc, false, lightViewProj);
-                    this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
+                    this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
                     // Handle animation matrices if present
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;
@@ -17708,4 +17788,4 @@ class InstanceManager {
 // @ts-ignore
 globalThis.InstanceManager = InstanceManager;
 
-export { AnimationWorkerManager, GPUResourceCache, GPUResourceManager, InstanceManager, ModelLoader };
+export { AnimationWorkerManager, GPUResourceCache, GPUResourceManager, InstanceManager, ModelLoader, ShaderUniformCache };

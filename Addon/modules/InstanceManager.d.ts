@@ -14,6 +14,7 @@ export declare class InstanceManager implements IInstanceManager {
     private shadowMapShader;
     private shadowMapManager;
     debugShadowMap: boolean;
+    private uniformCache;
     private instanceBuffers;
     private nextInstanceId;
     private dirtyInstances;

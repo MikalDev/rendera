@@ -5,6 +5,7 @@ import { Model } from './Model';
 import { AnimationController } from './AnimationController';
 import { mat3, mat4 } from 'gl-matrix';
 import { ShadowMapManager } from './ShadowMapManager';
+import { ShaderUniformCache } from './ShaderUniformCache';
 
 export class InstanceManager implements IInstanceManager {
     private gl: WebGL2RenderingContext;
@@ -15,6 +16,9 @@ export class InstanceManager implements IInstanceManager {
     private shadowMapShader: WebGLProgram;
     private shadowMapManager: ShadowMapManager;
     public debugShadowMap: boolean = false;
+    
+    // Shader uniform location cache
+    private uniformCache: ShaderUniformCache;
     
     // GPU instance data
     private instanceBuffers: Map<string, {
@@ -42,6 +46,9 @@ export class InstanceManager implements IInstanceManager {
         this.shadowMapManager = new ShadowMapManager(gl, this.gpuResources);
         this.shadowMapManager.initialize(2048);
         this.shadowMapShader = this.gpuResources.getShadowMapShader();
+        
+        // Initialize uniform cache
+        this.uniformCache = new ShaderUniformCache(gl);
     }
 
     initialize(): void {
@@ -376,16 +383,17 @@ export class InstanceManager implements IInstanceManager {
                     // 2. Bind VAO (contains vertex attributes setup)
                     this.gl.bindVertexArray(primitive.vao);
 
-                    // 3. Set required uniforms
-                    const viewLoc = this.gl.getUniformLocation(shader, 'u_View');
-                    const projectionLoc = this.gl.getUniformLocation(shader, 'u_Projection');
-                    const modelMatrixLoc = this.gl.getUniformLocation(shader, 'u_Model');
-                    const normalMatrixLoc = this.gl.getUniformLocation(shader, 'u_NormalMatrix');
-                    const nodeMatrixLoc = this.gl.getUniformLocation(shader, 'u_NodeMatrix');
-                    const useSkinningLoc = this.gl.getUniformLocation(shader, 'u_UseSkinning');
+                    // 3. Set required uniforms using cached locations
+                    const viewLoc = this.uniformCache.getLocation(shader, 'u_View');
+                    const projectionLoc = this.uniformCache.getLocation(shader, 'u_Projection');
+                    const modelLoc = this.uniformCache.getLocation(shader, 'u_Model');
+                    const nodeMatrixLoc = this.uniformCache.getLocation(shader, 'u_NodeMatrix');
+                    const useSkinningLoc = this.uniformCache.getLocation(shader, 'u_UseSkinning');
+                    
                     this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
                     this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
-                    this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
+                    this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
+                    
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;
                     const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
@@ -419,6 +427,7 @@ export class InstanceManager implements IInstanceManager {
                         mat3.normalFromMat4(normalMatrix, instance.worldMatrix);
                     }
 
+                    const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
                     this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);
                    
                     // 5. Bind material properties (textures and uniforms)
@@ -483,16 +492,16 @@ export class InstanceManager implements IInstanceManager {
                     // 1. Bind VAO
                     this.gl.bindVertexArray(primitive.vao);
 
-                    // 2. Set minimal required uniforms for shadow mapping
-                    const viewProjLoc = this.gl.getUniformLocation(shadowShader, 'u_LightViewProjection');
-                    const modelMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_Model');
-                    const nodeMatrixLoc = this.gl.getUniformLocation(shadowShader, 'u_NodeMatrix');
-                    const useSkinningLoc = this.gl.getUniformLocation(shadowShader, 'u_UseSkinning');
+                    // 2. Set minimal required uniforms for shadow mapping using cached locations
+                    const viewProjLoc = this.uniformCache.getLocation(shadowShader, 'u_LightViewProjection');
+                    const modelLoc = this.uniformCache.getLocation(shadowShader, 'u_Model');
+                    const nodeMatrixLoc = this.uniformCache.getLocation(shadowShader, 'u_NodeMatrix');
+                    const useSkinningLoc = this.uniformCache.getLocation(shadowShader, 'u_UseSkinning');
 
                     // Combine view and projection for efficiency
                     const lightViewProj = mat4.multiply(mat4.create(), viewProjection.projection, viewProjection.view);
                     this.gl.uniformMatrix4fv(viewProjLoc, false, lightViewProj);
-                    this.gl.uniformMatrix4fv(modelMatrixLoc, false, instance.worldMatrix);
+                    this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
 
                     // Handle animation matrices if present
                     const animationState = instance.animationState;

@@ -37,6 +37,9 @@ export * from './SceneGraph';
 /// <reference path="./ScreenSpaceShadowManager.d.ts" />
 export * from './ScreenSpaceShadowManager';
 
+/// <reference path="./ShaderUniformCache.d.ts" />
+export * from './ShaderUniformCache';
+
 /// <reference path="./ShadowMapManager.d.ts" />
 export * from './ShadowMapManager';
 

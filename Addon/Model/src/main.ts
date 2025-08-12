@@ -3,3 +3,4 @@ export { GPUResourceManager } from './GPUResourceManager';
 export { InstanceManager } from './InstanceManager';
 export { GPUResourceCache } from './GPUResourceCache';
 export { AnimationWorkerManager } from './AnimationWorkerManager';
+export { ShaderUniformCache } from './ShaderUniformCache';
