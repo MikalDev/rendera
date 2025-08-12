@@ -167,7 +167,17 @@ export declare class ShadowMapManager {
     cleanup(): void;
     renderInstances(instanceManager: InstanceManager, shadowData: ShadowMapData): void;
     /**
-     * Renders the shadow map for a given light.
+     * Internal method that renders a shadow map without managing GL state.
+     * Used when rendering multiple shadow maps in a frame.
+     *
+     * @param lightId - The ID of the light to render shadows for
+     * @param instanceManager - The instance manager that will render the scene
+     * @throws Error if the shadow map resources aren't initialized
+     * @private
+     */
+    private renderShadowMapInternal;
+    /**
+     * Public method that renders a single shadow map with GL state management.
      * Handles all the setup, rendering, and cleanup for shadow map generation.
      * Preserves WebGL state and restores it after rendering.
      *
@@ -207,8 +217,18 @@ export declare class ShadowMapManager {
     removeShadowMap(lightId: number): void;
     private cleanupGLResources;
     /**
+     * Begins a shadow map rendering frame.
+     * Caches GL state once for the entire shadow rendering pass.
+     */
+    private beginShadowMapFrame;
+    /**
+     * Ends a shadow map rendering frame.
+     * Restores the cached GL state after all shadow maps are rendered.
+     */
+    private endShadowMapFrame;
+    /**
      * Renders shadow maps for all enabled lights.
-     * Iterates over all shadow maps and renders them if the light is enabled.
+     * Caches GL state once at the beginning and restores once at the end.
      * @param instanceManager - The instance manager that will render the scene
      */
     renderAllShadowMaps(instanceManager: InstanceManager): void;

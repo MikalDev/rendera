@@ -14264,6 +14264,8 @@ globalThis.ModelLoader = ModelLoader;
 class GPUResourceCache {
     constructor(gl) {
         this.cachedState = null;
+        // Temporary shadow map state - not persistent between calls
+        this.tempShadowState = null;
         this.gl = gl;
     }
     cacheModelMode() {
@@ -14330,7 +14332,9 @@ class GPUResourceCache {
      * We skip unit 0 as it will be restored from cached state
      */
     cleanupTextureUnits() {
-        const currentActiveTexture = this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+        var _a, _b;
+        // Use cached activeTexture if available, otherwise query GL
+        const currentActiveTexture = (_b = (_a = this.cachedState) === null || _a === void 0 ? void 0 : _a.activeTexture) !== null && _b !== void 0 ? _b : this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
         // Clean material texture units (1-4)
         for (let unit = 1; unit <= 4; unit++) {
             this.gl.activeTexture(this.gl.TEXTURE0 + unit);
@@ -14343,6 +14347,76 @@ class GPUResourceCache {
         }
         // Restore the active texture unit
         this.gl.activeTexture(currentActiveTexture);
+    }
+    /**
+     * Cache the current GL state before shadow map rendering.
+     * Always queries fresh state to avoid stale references to deleted objects.
+     */
+    cacheShadowMapState() {
+        // Always query fresh GL state to avoid stale references
+        this.tempShadowState = {
+            textureBinding2D: this.gl.getParameter(this.gl.TEXTURE_BINDING_2D),
+            framebufferBinding: this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING),
+            viewport: this.gl.getParameter(this.gl.VIEWPORT),
+            depthTest: this.gl.getParameter(this.gl.DEPTH_TEST),
+            depthFunc: this.gl.getParameter(this.gl.DEPTH_FUNC),
+            colorWritemask: this.gl.getParameter(this.gl.COLOR_WRITEMASK),
+            scissorTest: this.gl.getParameter(this.gl.SCISSOR_TEST),
+            blend: this.gl.getParameter(this.gl.BLEND),
+            currentProgram: this.gl.getParameter(this.gl.CURRENT_PROGRAM),
+            colorClearValue: this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE),
+            depthClearValue: this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE)
+        };
+    }
+    /**
+     * Restore the cached GL state after shadow map rendering.
+     * Clears the temp state after restoring to prevent stale references.
+     */
+    restoreShadowMapState() {
+        if (this.tempShadowState) {
+            // Restore all cached GL state
+            this.gl.bindTexture(this.gl.TEXTURE_2D, this.tempShadowState.textureBinding2D);
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.tempShadowState.framebufferBinding);
+            this.gl.viewport(this.tempShadowState.viewport[0], this.tempShadowState.viewport[1], this.tempShadowState.viewport[2], this.tempShadowState.viewport[3]);
+            if (this.tempShadowState.depthTest) {
+                this.gl.enable(this.gl.DEPTH_TEST);
+            }
+            else {
+                this.gl.disable(this.gl.DEPTH_TEST);
+            }
+            this.gl.depthFunc(this.tempShadowState.depthFunc);
+            this.gl.colorMask(this.tempShadowState.colorWritemask[0], this.tempShadowState.colorWritemask[1], this.tempShadowState.colorWritemask[2], this.tempShadowState.colorWritemask[3]);
+            if (this.tempShadowState.scissorTest) {
+                this.gl.enable(this.gl.SCISSOR_TEST);
+            }
+            else {
+                this.gl.disable(this.gl.SCISSOR_TEST);
+            }
+            if (this.tempShadowState.blend) {
+                this.gl.enable(this.gl.BLEND);
+            }
+            else {
+                this.gl.disable(this.gl.BLEND);
+            }
+            this.gl.useProgram(this.tempShadowState.currentProgram);
+            this.gl.clearColor(this.tempShadowState.colorClearValue[0], this.tempShadowState.colorClearValue[1], this.tempShadowState.colorClearValue[2], this.tempShadowState.colorClearValue[3]);
+            this.gl.clearDepth(this.tempShadowState.depthClearValue);
+            // Clear temp state after restore to prevent stale references
+            this.tempShadowState = null;
+        }
+    }
+    /**
+     * Get the cached shadow state.
+     * Returns the temporary state if available.
+     */
+    getShadowState() {
+        return this.tempShadowState;
+    }
+    /**
+     * Clear the shadow state cache (e.g., on context loss).
+     */
+    clearShadowStateCache() {
+        this.tempShadowState = null;
     }
 }
 // Track which UBO binding points we care about
@@ -16703,7 +16777,40 @@ class ShadowMapManager {
         }
     }
     /**
-     * Renders the shadow map for a given light.
+     * Internal method that renders a shadow map without managing GL state.
+     * Used when rendering multiple shadow maps in a frame.
+     *
+     * @param lightId - The ID of the light to render shadows for
+     * @param instanceManager - The instance manager that will render the scene
+     * @throws Error if the shadow map resources aren't initialized
+     * @private
+     */
+    renderShadowMapInternal(lightId, instanceManager) {
+        const shadowData = this.shadowMaps.get(lightId);
+        if (!shadowData) {
+            throw new Error(`No shadow map data found for light ${lightId}`);
+        }
+        // Set up shadow rendering state (no try/finally needed, state is managed at frame level)
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, shadowData.framebuffer);
+        this.gl.viewport(0, 0, this.resolution, this.resolution);
+        if (ShadowMapManager.DEBUG_SHADOWS) {
+            const textureId = shadowData.texture.__debugId || 'unknown';
+            console.log(`[ShadowMapManager] Rendering shadow map for light ${lightId}, using texture ID ${textureId}, framebuffer ${shadowData.framebuffer}`);
+        }
+        this.gl.disable(this.gl.SCISSOR_TEST);
+        // Clear depth buffer
+        this.gl.clearDepth(1.0);
+        this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
+        // Set up depth test state
+        this.gl.enable(this.gl.DEPTH_TEST);
+        this.gl.depthFunc(this.gl.LESS);
+        // Disable color writing as we only need depth
+        this.gl.colorMask(false, false, false, false);
+        // Render the scene from light's perspective
+        this.renderInstances(instanceManager, shadowData);
+    }
+    /**
+     * Public method that renders a single shadow map with GL state management.
      * Handles all the setup, rendering, and cleanup for shadow map generation.
      * Preserves WebGL state and restores it after rendering.
      *
@@ -16712,60 +16819,14 @@ class ShadowMapManager {
      * @throws Error if the shadow map resources aren't initialized
      */
     renderShadowMap(lightId, instanceManager) {
-        const shadowData = this.shadowMaps.get(lightId);
-        if (!shadowData) {
-            throw new Error(`No shadow map data found for light ${lightId}`);
-        }
-        // Store current state
-        const currentViewport = this.gl.getParameter(this.gl.VIEWPORT);
-        const currentFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
-        const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
-        const currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
-        const currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
-        const currentScissorTest = this.gl.getParameter(this.gl.SCISSOR_TEST);
-        const currentClearColor = this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
-        const currentClearDepth = this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE);
+        // Cache GL state for single shadow map render
+        this.beginShadowMapFrame();
         try {
-            // Set up shadow rendering state
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, shadowData.framebuffer);
-            this.gl.viewport(0, 0, this.resolution, this.resolution);
-            if (ShadowMapManager.DEBUG_SHADOWS) {
-                const textureId = shadowData.texture.__debugId || 'unknown';
-                console.log(`[ShadowMapManager] Rendering shadow map for light ${lightId}, using texture ID ${textureId}, framebuffer ${shadowData.framebuffer}`);
-            }
-            this.gl.disable(this.gl.SCISSOR_TEST);
-            // Add before clearing
-            this.gl.clearDepth(currentClearDepth);
-            this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
-            // Set up depth test state
-            this.gl.enable(this.gl.DEPTH_TEST);
-            this.gl.depthFunc(this.gl.LESS);
-            // Disable color writing as we only need depth
-            this.gl.colorMask(false, false, false, false);
-            // Render the scene from light's perspective
-            this.renderInstances(instanceManager, shadowData);
+            this.renderShadowMapInternal(lightId, instanceManager);
         }
         finally {
-            // Restore state
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, currentFramebuffer);
-            this.gl.viewport(currentViewport[0], currentViewport[1], currentViewport[2], currentViewport[3]);
-            this.gl.depthFunc(currentDepthFunc);
-            if (currentDepthTest) {
-                this.gl.enable(this.gl.DEPTH_TEST);
-            }
-            else {
-                this.gl.disable(this.gl.DEPTH_TEST);
-            }
-            this.gl.colorMask(currentColorMask[0], currentColorMask[1], currentColorMask[2], currentColorMask[3]);
-            // Add to state restore
-            this.gl.clearColor(currentClearColor[0], currentClearColor[1], currentClearColor[2], currentClearColor[3]);
-            this.gl.clearDepth(currentClearDepth);
-            if (currentScissorTest) {
-                this.gl.enable(this.gl.SCISSOR_TEST);
-            }
-            else {
-                this.gl.disable(this.gl.SCISSOR_TEST);
-            }
+            // Restore GL state
+            this.endShadowMapFrame();
         }
     }
     /**
@@ -16844,16 +16905,40 @@ class ShadowMapManager {
         this.gl.deleteFramebuffer(data.framebuffer);
     }
     /**
+     * Begins a shadow map rendering frame.
+     * Caches GL state once for the entire shadow rendering pass.
+     */
+    beginShadowMapFrame() {
+        // Cache GL state once at the beginning of the frame
+        this.gpuResourceManager.gpuResourceCache.cacheShadowMapState();
+    }
+    /**
+     * Ends a shadow map rendering frame.
+     * Restores the cached GL state after all shadow maps are rendered.
+     */
+    endShadowMapFrame() {
+        // Restore GL state once at the end of the frame
+        this.gpuResourceManager.gpuResourceCache.restoreShadowMapState();
+    }
+    /**
      * Renders shadow maps for all enabled lights.
-     * Iterates over all shadow maps and renders them if the light is enabled.
+     * Caches GL state once at the beginning and restores once at the end.
      * @param instanceManager - The instance manager that will render the scene
      */
     renderAllShadowMaps(instanceManager) {
-        // For each light that casts shadows
-        for (const [lightId, shadowData] of this.shadowMaps) {
-            if (shadowData.light.enabled) {
-                this.renderShadowMap(lightId, instanceManager);
+        // Cache GL state once for all shadow maps
+        this.beginShadowMapFrame();
+        try {
+            // For each light that casts shadows
+            for (const [lightId, shadowData] of this.shadowMaps) {
+                if (shadowData.light.enabled) {
+                    this.renderShadowMapInternal(lightId, instanceManager);
+                }
             }
+        }
+        finally {
+            // Restore GL state once after all shadow maps
+            this.endShadowMapFrame();
         }
     }
     /**
@@ -16876,12 +16961,8 @@ class ShadowMapManager {
         if (!shadowData) {
             throw new Error(`No shadow map data found for light ${lightId}`);
         }
-        // Store WebGL state
-        const currentProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
-        const currentViewport = this.gl.getParameter(this.gl.VIEWPORT);
-        const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
-        const currentBlend = this.gl.getParameter(this.gl.BLEND);
-        const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+        // Cache GL state for debug rendering
+        this.beginShadowMapFrame();
         try {
             // Set up state for debug rendering
             this.gl.disable(this.gl.DEPTH_TEST);
@@ -16947,22 +17028,8 @@ class ShadowMapManager {
             this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
         }
         finally {
-            // Restore WebGL state
-            this.gl.useProgram(currentProgram);
-            this.gl.viewport(currentViewport[0], currentViewport[1], currentViewport[2], currentViewport[3]);
-            if (currentDepthTest) {
-                this.gl.enable(this.gl.DEPTH_TEST);
-            }
-            else {
-                this.gl.disable(this.gl.DEPTH_TEST);
-            }
-            if (currentBlend) {
-                this.gl.enable(this.gl.BLEND);
-            }
-            else {
-                this.gl.disable(this.gl.BLEND);
-            }
-            this.gl.bindTexture(this.gl.TEXTURE_2D, currentTexture);
+            // Restore GL state
+            this.endShadowMapFrame();
         }
     }
     /**
