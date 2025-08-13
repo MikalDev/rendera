@@ -43,6 +43,8 @@ export interface AnimationState {
     animationNodeTransforms: Map<number, NodeTransforms>;
     animationMatrices: Map<number, mat4>;
     boneMatrices: Map<number, Float32Array>;
+    blendSource?: Map<number, NodeTransforms>;
+    blendDuration?: number;
 }
 export interface NodeTransforms {
     rotation: vec4;
@@ -106,6 +108,7 @@ export interface IGPUResourceCache {
 export interface IInstanceManager {
     updateModelAnimation(instance: Model, deltaTime: number): void;
     setModelBindPose(instance: Model): void;
+    startAnimation(instance: Model, animationName: string, options?: AnimationOptions): void;
     markInstanceDirty(instanceId: number): void;
     invalidateAnimationCache(instanceId: number): void;
     enableModelNode(nodeName: string, instance: Model): void;

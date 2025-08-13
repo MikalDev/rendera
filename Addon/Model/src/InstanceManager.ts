@@ -547,19 +547,20 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    private startAnimation(
-        instance: InstanceData,
+    // Public method for Model class to call with blending support
+    public startAnimation(
+        model: Model,
         animationName: string,
         options?: AnimationOptions
     ): void {
-        const animationState = instance.animationState;
-        animationState.currentAnimation = animationName;
-        animationState.currentTime = 0;
-        animationState.playing = true;
-        if (options) {
-            animationState.speed = options.speed ?? 1;
-            animationState.loop = options.loop ?? true;
+        const instance = this.instances.get(model.instanceId.id);
+        if (!instance) {
+            console.warn('[InstanceManager] Instance not found:', model.instanceId.id);
+            return;
         }
+        
+        // Use AnimationController's startAnimation which supports blending
+        this.animationController.startAnimation(instance, animationName, options);
     }
 
     private cleanupInstance(instanceId: number): void {

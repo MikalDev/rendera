@@ -1,6 +1,6 @@
 // src/AnimationController.ts
 import { ModelLoader } from './ModelLoader';
-import { InstanceData, AnimationOptions, AnimationState, ExtendedNode, AnimationEventCallback, AnimationEventType, AnimationEventData } from './types';
+import { InstanceData, AnimationOptions, AnimationState, ExtendedNode, AnimationEventCallback, AnimationEventType, AnimationEventData, NodeTransforms } from './types';
 import { mat4, quat, vec3, vec4 } from 'gl-matrix';
 import { Scene, Animation, Node, TypedArray } from '@gltf-transform/core';
 import { AnimationWorkerManager } from './AnimationWorkerManager';
@@ -228,6 +228,24 @@ export class AnimationController {
         if (this.useWorker && this.workerManager) {
             // Check if model is ready in worker
             if (this.workerManager.isModelReady(instance.instanceId.modelId)) {
+                // Prepare blend state if active
+                let blendSource: Float32Array | undefined;
+                let blendDuration: number | undefined;
+                
+                // Only send blend source on first frame (when time is near 0)
+                // Worker will cache it and use for the entire blend duration
+                if (animationState.blendSource && animationState.blendDuration && newTime < 0.05) {
+                    const nodeCount = modelData?.nodeArray?.length || 0;
+                    blendSource = this.packTransformsForWorker(animationState.blendSource, nodeCount);
+                    blendDuration = animationState.blendDuration;
+                }
+                
+                // Clean up blend state when complete
+                if (animationState.blendDuration && newTime >= animationState.blendDuration) {
+                    animationState.blendSource = undefined;
+                    animationState.blendDuration = undefined;
+                }
+                
                 // Fire-and-forget request with callback
                 this.workerManager.requestAnimation(
                     instance.instanceId.id,
@@ -236,6 +254,8 @@ export class AnimationController {
                     newTime,
                     animationState.loop,
                     modelData?.jointData?.length > 0,
+                    blendSource,
+                    blendDuration,
                     (result) => {
                         // Apply results when they arrive
                         this.applyWorkerResults(instance, result, modelData);
@@ -454,6 +474,30 @@ export class AnimationController {
                     break;
             }
         }
+        
+        // Apply blending if active
+        if (animationState.blendSource && animationState.blendDuration) {
+            const blendProgress = Math.min(1, animationState.currentTime / animationState.blendDuration);
+            
+            if (blendProgress < 1) {
+                // Blend between source and target
+                for (const [nodeIndex, targetTransform] of animationState.animationNodeTransforms) {
+                    const sourceTransform = animationState.blendSource.get(nodeIndex);
+                    if (sourceTransform) {
+                        // Lerp translation and scale
+                        vec3.lerp(targetTransform.translation, sourceTransform.translation, targetTransform.translation, blendProgress);
+                        vec3.lerp(targetTransform.scale, sourceTransform.scale, targetTransform.scale, blendProgress);
+                        // Slerp rotation
+                        quat.slerp(targetTransform.rotation, sourceTransform.rotation, targetTransform.rotation, blendProgress);
+                        quat.normalize(targetTransform.rotation, targetTransform.rotation);
+                    }
+                }
+            } else {
+                // Blend complete - clear blend state
+                animationState.blendSource = undefined;
+                animationState.blendDuration = undefined;
+            }
+        }
     }
 
     private updateNodeSkinningMatrices(instance: InstanceData): void {
@@ -654,6 +698,19 @@ export class AnimationController {
         options?: AnimationOptions
     ): void {
         const animationState = instance.animationState;
+        
+        // Check if we should blend from current animation
+        if (options?.blendDuration && options.blendDuration > 0 && 
+            animationState.playing && animationState.currentAnimation) {
+            // Capture current state for blending
+            animationState.blendSource = this.captureCurrentTransforms(animationState.animationNodeTransforms);
+            animationState.blendDuration = options.blendDuration;
+        } else {
+            // No blending - clear any blend state
+            animationState.blendSource = undefined;
+            animationState.blendDuration = undefined;
+        }
+        
         animationState.currentAnimation = animationName;
         animationState.currentTime = 0;
         animationState.speed = options?.speed ?? 1;
@@ -663,6 +720,46 @@ export class AnimationController {
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
     }
+    
+    private captureCurrentTransforms(
+        transforms: Map<number, NodeTransforms>
+    ): Map<number, NodeTransforms> {
+        const snapshot = new Map<number, NodeTransforms>();
+        for (const [nodeIndex, transform] of transforms) {
+            snapshot.set(nodeIndex, {
+                translation: vec3.clone(transform.translation),
+                rotation: quat.clone(transform.rotation),
+                scale: vec3.clone(transform.scale)
+            });
+        }
+        return snapshot;
+    }
+    
+    private packTransformsForWorker(
+        transforms: Map<number, NodeTransforms>,
+        nodeCount: number
+    ): Float32Array {
+        const packed = new Float32Array(nodeCount * 10);
+        
+        for (const [nodeIndex, transform] of transforms) {
+            const offset = nodeIndex * 10;
+            // Translation (3 floats)
+            packed[offset] = transform.translation[0];
+            packed[offset + 1] = transform.translation[1];
+            packed[offset + 2] = transform.translation[2];
+            // Rotation (4 floats)
+            packed[offset + 3] = transform.rotation[0];
+            packed[offset + 4] = transform.rotation[1];
+            packed[offset + 5] = transform.rotation[2];
+            packed[offset + 6] = transform.rotation[3];
+            // Scale (3 floats)
+            packed[offset + 7] = transform.scale[0];
+            packed[offset + 8] = transform.scale[1];
+            packed[offset + 9] = transform.scale[2];
+        }
+        
+        return packed;
+    }
 
     stopAnimation(instance: InstanceData): void {
         const previousAnimation = instance.animationState.currentAnimation;
@@ -670,6 +767,10 @@ export class AnimationController {
         instance.animationState.playing = false;
         instance.animationState.currentAnimation = null;
         instance.animationState.currentTime = 0;
+        
+        // Clear blend state
+        instance.animationState.blendSource = undefined;
+        instance.animationState.blendDuration = undefined;
         
         // Fire stop event if there was an animation playing
         if (previousAnimation) {

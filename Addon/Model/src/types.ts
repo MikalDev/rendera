@@ -62,6 +62,9 @@ export interface AnimationState {
     animationNodeTransforms: Map<number, NodeTransforms>;
     animationMatrices: Map<number, mat4>; // Node index to animation matrix calculated by animation controller for this instance
     boneMatrices: Map<number, Float32Array>;
+    // Simple blending state - only exists during transitions
+    blendSource?: Map<number, NodeTransforms>;  // Snapshot when blend starts
+    blendDuration?: number;   // How long to blend (0 = no blending)
 }
 
 export interface NodeTransforms {
@@ -150,6 +153,7 @@ export interface IInstanceManager {
     // Essential methods that need manager access
     updateModelAnimation(instance: Model, deltaTime: number): void;
     setModelBindPose(instance: Model): void;
+    startAnimation(instance: Model, animationName: string, options?: AnimationOptions): void;
     
     // Helper methods for Model class
     markInstanceDirty(instanceId: number): void;

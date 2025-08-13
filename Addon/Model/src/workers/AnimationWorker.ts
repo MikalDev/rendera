@@ -39,6 +39,9 @@ interface ComputeAnimationRequest {
     animationTime: number;
     loop: boolean;
     needsBones: boolean;  // Only compute bones if model has skinning
+    // Optional blending parameters
+    blendSource?: Float32Array;  // Packed source transforms (10 floats per node)
+    blendDuration?: number;       // Total blend duration
 }
 
 
@@ -85,6 +88,10 @@ interface InstanceState {
     lastAnimationName?: string;
     lastAnimationTime?: number;
     cachedKeyframeIndices?: Map<string, number>;  // Channel key -> last keyframe index
+    // Blend state - cached per instance
+    blendSource?: Float32Array;
+    blendDuration?: number;
+    blendStartAnimation?: string;  // Track which animation the blend is for
 }
 
 const modelCache = new Map<string, ModelCache>();
@@ -151,7 +158,7 @@ self.onmessage = (event: MessageEvent) => {
 
 // Handle full animation computation request
 function handleComputeAnimation(request: ComputeAnimationRequest): void {
-    const { instanceId, requestId, modelId, animationName, animationTime, loop, needsBones } = request;
+    const { instanceId, requestId, modelId, animationName, animationTime, loop, needsBones, blendSource, blendDuration } = request;
     
     try {
         // Get cached data
@@ -185,12 +192,47 @@ function handleComputeAnimation(request: ComputeAnimationRequest): void {
         const time = loop ? (animationTime % animation.duration) : Math.min(animationTime, animation.duration);
         
         // Step 1: Interpolate keyframes to get node transforms
-        const nodeTransforms = interpolateAnimation(
+        let nodeTransforms = interpolateAnimation(
             animation,
             hierarchy,
             time,
             instanceState.cachedKeyframeIndices!
         );
+        
+        // Step 1.5: Handle blending
+        // Cache blend state if provided
+        if (blendSource && blendDuration && blendDuration > 0) {
+            // New blend starting - cache it
+            instanceState.blendSource = new Float32Array(blendSource);
+            instanceState.blendDuration = blendDuration;
+            instanceState.blendStartAnimation = animationName;
+        }
+        
+        // Apply cached blend if active
+        if (instanceState.blendSource && 
+            instanceState.blendDuration && 
+            instanceState.blendStartAnimation === animationName) {
+            
+            const blendProgress = Math.min(1, animationTime / instanceState.blendDuration);
+            if (blendProgress < 1) {
+                nodeTransforms = blendNodeTransforms(
+                    instanceState.blendSource,
+                    nodeTransforms,
+                    blendProgress,
+                    hierarchy.nodeCount
+                );
+            } else {
+                // Blend complete - clear cached state
+                instanceState.blendSource = undefined;
+                instanceState.blendDuration = undefined;
+                instanceState.blendStartAnimation = undefined;
+            }
+        } else if (instanceState.blendStartAnimation !== animationName) {
+            // Different animation started - clear old blend
+            instanceState.blendSource = undefined;
+            instanceState.blendDuration = undefined;
+            instanceState.blendStartAnimation = undefined;
+        }
         
         // Step 2: Compute hierarchy transforms
         const animationMatrices = computeHierarchyTransforms(
@@ -356,6 +398,43 @@ function interpolateValues(
     }
     
     return result;
+}
+
+// Simple blend between two sets of node transforms
+function blendNodeTransforms(
+    sourceTransforms: Float32Array,
+    targetTransforms: Float32Array,
+    blendFactor: number,
+    nodeCount: number
+): Float32Array {
+    const blended = new Float32Array(nodeCount * 10);
+    
+    for (let i = 0; i < nodeCount; i++) {
+        const offset = i * 10;
+        
+        // Extract source transforms
+        const srcTrans = sourceTransforms.subarray(offset, offset + 3);
+        const srcRot = sourceTransforms.subarray(offset + 3, offset + 7);
+        const srcScale = sourceTransforms.subarray(offset + 7, offset + 10);
+        
+        // Extract target transforms
+        const tgtTrans = targetTransforms.subarray(offset, offset + 3);
+        const tgtRot = targetTransforms.subarray(offset + 3, offset + 7);
+        const tgtScale = targetTransforms.subarray(offset + 7, offset + 10);
+        
+        // Blend translation
+        vec3.lerp(blended.subarray(offset, offset + 3), srcTrans, tgtTrans, blendFactor);
+        
+        // Blend rotation (slerp)
+        const blendedRot = blended.subarray(offset + 3, offset + 7);
+        quat.slerp(blendedRot, srcRot, tgtRot, blendFactor);
+        quat.normalize(blendedRot, blendedRot);
+        
+        // Blend scale
+        vec3.lerp(blended.subarray(offset + 7, offset + 10), srcScale, tgtScale, blendFactor);
+    }
+    
+    return blended;
 }
 
 // Compute hierarchy transforms (world matrices)

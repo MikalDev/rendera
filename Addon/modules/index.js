@@ -12486,7 +12486,7 @@ function create$3() {
  * @returns {mat4} a new 4x4 matrix
  */
 
-function clone$1(a) {
+function clone$3(a) {
   var out = new ARRAY_TYPE(16);
   out[0] = a[0];
   out[1] = a[1];
@@ -13086,7 +13086,7 @@ function create$2() {
  * @returns {vec3} a new 3D vector
  */
 
-function clone(a) {
+function clone$2(a) {
   var out = new ARRAY_TYPE(3);
   out[0] = a[0];
   out[1] = a[1];
@@ -13384,6 +13384,21 @@ function create$1() {
   return out;
 }
 /**
+ * Creates a new vec4 initialized with values from an existing vector
+ *
+ * @param {ReadonlyVec4} a vector to clone
+ * @returns {vec4} a new 4D vector
+ */
+
+function clone$1(a) {
+  var out = new ARRAY_TYPE(4);
+  out[0] = a[0];
+  out[1] = a[1];
+  out[2] = a[2];
+  out[3] = a[3];
+  return out;
+}
+/**
  * Normalize a vec4
  *
  * @param {vec4} out the receiving vector
@@ -13597,6 +13612,15 @@ function fromMat3(out, m) {
 
   return out;
 }
+/**
+ * Creates a new quat initialized with values from an existing quaternion
+ *
+ * @param {ReadonlyQuat} a quaternion to clone
+ * @returns {quat} a new quaternion
+ * @function
+ */
+
+var clone = clone$1;
 /**
  * Normalize a quat
  *
@@ -15516,16 +15540,9 @@ class Model {
         this.normalMapEnabled = enabled;
     }
     playAnimation(animationName, options) {
-        var _a, _b;
-        this._instanceData.animationState.currentAnimation = animationName;
-        this._instanceData.animationState.currentTime = 0;
-        this._instanceData.animationState.playing = true;
-        if (options) {
-            this._instanceData.animationState.speed = (_a = options.speed) !== null && _a !== void 0 ? _a : 1;
-            this._instanceData.animationState.loop = (_b = options.loop) !== null && _b !== void 0 ? _b : true;
-        }
-        // Still need manager for animation controller access
-        this._manager.invalidateAnimationCache(this.instanceId.id);
+        // Use the manager's startAnimation method which properly handles blending
+        // The manager has access to AnimationController with the new blending logic
+        this._manager.startAnimation(this, animationName, options);
     }
     updateAnimation(deltaTime) {
         // Delegate to manager as it needs access to AnimationController
@@ -15760,7 +15777,7 @@ class AnimationWorkerManager {
         return this.cachedModels.has(modelId);
     }
     // Fire-and-forget animation request with callback
-    requestAnimation(instanceId, modelId, animationName, animationTime, loop, needsBones, callback) {
+    requestAnimation(instanceId, modelId, animationName, animationTime, loop, needsBones, blendSource, blendDuration, callback) {
         if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
             console.warn('[AnimationWorkerManager] Worker not ready for animation request');
             return;
@@ -15772,8 +15789,8 @@ class AnimationWorkerManager {
             reject: (error) => console.error('[AnimationWorkerManager] Animation failed:', error),
             instanceId
         });
-        // Send request immediately without waiting
-        this.worker.postMessage({
+        // Prepare message and transfers
+        const message = {
             type: 'COMPUTE_ANIMATION',
             instanceId,
             requestId,
@@ -15782,7 +15799,16 @@ class AnimationWorkerManager {
             animationTime,
             loop,
             needsBones
-        });
+        };
+        const transfers = [];
+        // Add blend parameters if provided
+        if (blendSource && blendDuration) {
+            message.blendSource = blendSource;
+            message.blendDuration = blendDuration;
+            transfers.push(blendSource.buffer);
+        }
+        // Send request immediately without waiting
+        this.worker.postMessage(message, transfers);
     }
     // Keep the old method for backward compatibility but mark as deprecated
     /** @deprecated Use requestAnimation for better performance */
@@ -15991,7 +16017,7 @@ class AnimationController {
         });
     }
     updateAnimation(instance, deltaTime) {
-        var _a, _b;
+        var _a, _b, _c;
         const instanceId = instance.instanceId.id;
         const animationState = instance.animationState;
         const currentAnimation = animationState.currentAnimation;
@@ -16024,8 +16050,23 @@ class AnimationController {
         if (this.useWorker && this.workerManager) {
             // Check if model is ready in worker
             if (this.workerManager.isModelReady(instance.instanceId.modelId)) {
+                // Prepare blend state if active
+                let blendSource;
+                let blendDuration;
+                // Only send blend source on first frame (when time is near 0)
+                // Worker will cache it and use for the entire blend duration
+                if (animationState.blendSource && animationState.blendDuration && newTime < 0.05) {
+                    const nodeCount = ((_a = modelData === null || modelData === void 0 ? void 0 : modelData.nodeArray) === null || _a === void 0 ? void 0 : _a.length) || 0;
+                    blendSource = this.packTransformsForWorker(animationState.blendSource, nodeCount);
+                    blendDuration = animationState.blendDuration;
+                }
+                // Clean up blend state when complete
+                if (animationState.blendDuration && newTime >= animationState.blendDuration) {
+                    animationState.blendSource = undefined;
+                    animationState.blendDuration = undefined;
+                }
                 // Fire-and-forget request with callback
-                this.workerManager.requestAnimation(instance.instanceId.id, instance.instanceId.modelId, currentAnimation, newTime, animationState.loop, ((_a = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _a === void 0 ? void 0 : _a.length) > 0, (result) => {
+                this.workerManager.requestAnimation(instance.instanceId.id, instance.instanceId.modelId, currentAnimation, newTime, animationState.loop, ((_b = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _b === void 0 ? void 0 : _b.length) > 0, blendSource, blendDuration, (result) => {
                     // Apply results when they arrive
                     this.applyWorkerResults(instance, result, modelData);
                     this.updateInstanceCache(instance);
@@ -16039,7 +16080,7 @@ class AnimationController {
         this.updateNodeLocalTransforms(instance);
         this.updateNodeAnimationTransforms(instance, animation);
         this.updateNodeHierarchyTransforms(instance);
-        if (((_b = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _b === void 0 ? void 0 : _b.length) > 0) {
+        if (((_c = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _c === void 0 ? void 0 : _c.length) > 0) {
             this.updateNodeSkinningMatrices(instance);
         }
     }
@@ -16174,6 +16215,29 @@ class AnimationController {
                 case 'scale':
                     nodeTransforms.scale = value;
                     break;
+            }
+        }
+        // Apply blending if active
+        if (animationState.blendSource && animationState.blendDuration) {
+            const blendProgress = Math.min(1, animationState.currentTime / animationState.blendDuration);
+            if (blendProgress < 1) {
+                // Blend between source and target
+                for (const [nodeIndex, targetTransform] of animationState.animationNodeTransforms) {
+                    const sourceTransform = animationState.blendSource.get(nodeIndex);
+                    if (sourceTransform) {
+                        // Lerp translation and scale
+                        lerp(targetTransform.translation, sourceTransform.translation, targetTransform.translation, blendProgress);
+                        lerp(targetTransform.scale, sourceTransform.scale, targetTransform.scale, blendProgress);
+                        // Slerp rotation
+                        slerp(targetTransform.rotation, sourceTransform.rotation, targetTransform.rotation, blendProgress);
+                        normalize(targetTransform.rotation, targetTransform.rotation);
+                    }
+                }
+            }
+            else {
+                // Blend complete - clear blend state
+                animationState.blendSource = undefined;
+                animationState.blendDuration = undefined;
             }
         }
     }
@@ -16337,6 +16401,18 @@ class AnimationController {
     startAnimation(instance, animationName, options) {
         var _a, _b;
         const animationState = instance.animationState;
+        // Check if we should blend from current animation
+        if ((options === null || options === void 0 ? void 0 : options.blendDuration) && options.blendDuration > 0 &&
+            animationState.playing && animationState.currentAnimation) {
+            // Capture current state for blending
+            animationState.blendSource = this.captureCurrentTransforms(animationState.animationNodeTransforms);
+            animationState.blendDuration = options.blendDuration;
+        }
+        else {
+            // No blending - clear any blend state
+            animationState.blendSource = undefined;
+            animationState.blendDuration = undefined;
+        }
         animationState.currentAnimation = animationName;
         animationState.currentTime = 0;
         animationState.speed = (_a = options === null || options === void 0 ? void 0 : options.speed) !== null && _a !== void 0 ? _a : 1;
@@ -16345,11 +16421,45 @@ class AnimationController {
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
     }
+    captureCurrentTransforms(transforms) {
+        const snapshot = new Map();
+        for (const [nodeIndex, transform] of transforms) {
+            snapshot.set(nodeIndex, {
+                translation: clone$2(transform.translation),
+                rotation: clone(transform.rotation),
+                scale: clone$2(transform.scale)
+            });
+        }
+        return snapshot;
+    }
+    packTransformsForWorker(transforms, nodeCount) {
+        const packed = new Float32Array(nodeCount * 10);
+        for (const [nodeIndex, transform] of transforms) {
+            const offset = nodeIndex * 10;
+            // Translation (3 floats)
+            packed[offset] = transform.translation[0];
+            packed[offset + 1] = transform.translation[1];
+            packed[offset + 2] = transform.translation[2];
+            // Rotation (4 floats)
+            packed[offset + 3] = transform.rotation[0];
+            packed[offset + 4] = transform.rotation[1];
+            packed[offset + 5] = transform.rotation[2];
+            packed[offset + 6] = transform.rotation[3];
+            // Scale (3 floats)
+            packed[offset + 7] = transform.scale[0];
+            packed[offset + 8] = transform.scale[1];
+            packed[offset + 9] = transform.scale[2];
+        }
+        return packed;
+    }
     stopAnimation(instance) {
         const previousAnimation = instance.animationState.currentAnimation;
         instance.animationState.playing = false;
         instance.animationState.currentAnimation = null;
         instance.animationState.currentTime = 0;
+        // Clear blend state
+        instance.animationState.blendSource = undefined;
+        instance.animationState.blendDuration = undefined;
         // Fire stop event if there was an animation playing
         if (previousAnimation) {
             this.fireAnimationEvent(instance.instanceId.id, AnimationEventType.STOP, previousAnimation, instance.animationState.currentTime, 0, instance.instanceId.modelId);
@@ -16479,8 +16589,8 @@ class ShadowMapManager {
         this.validateBounds(bounds);
         // Create a copy to prevent external modification
         this.sceneBounds = {
-            min: clone(bounds.min),
-            max: clone(bounds.max)
+            min: clone$2(bounds.min),
+            max: clone$2(bounds.max)
         };
     }
     /**
@@ -16490,8 +16600,8 @@ class ShadowMapManager {
     getSceneBounds() {
         const bounds = this.sceneBounds || ShadowMapManager.DEFAULT_BOUNDS;
         return {
-            min: clone(bounds.min),
-            max: clone(bounds.max)
+            min: clone$2(bounds.min),
+            max: clone$2(bounds.max)
         };
     }
     /**
@@ -16531,8 +16641,8 @@ class ShadowMapManager {
     expandBounds(point) {
         if (!this.sceneBounds) {
             this.sceneBounds = {
-                min: clone(point),
-                max: clone(point)
+                min: clone$2(point),
+                max: clone$2(point)
             };
             return;
         }
@@ -16670,8 +16780,8 @@ class ShadowMapManager {
         // Create orthographic projection that encompasses the scene
         ortho(this.matrixPool.projection, -maxSize / 2, maxSize / 2, -maxSize / 2, maxSize / 2, 0.1, maxSize * 2);
         return {
-            view: clone$1(this.matrixPool.view),
-            projection: clone$1(this.matrixPool.projection)
+            view: clone$3(this.matrixPool.view),
+            projection: clone$3(this.matrixPool.projection)
         };
     }
     /**
@@ -16729,8 +16839,8 @@ class ShadowMapManager {
             console.log(`[ShadowMapManager] Spot light matrix calc - pos: [${light.position[0].toFixed(1)}, ${light.position[1].toFixed(1)}, ${light.position[2].toFixed(1)}], dir: [${light.direction[0].toFixed(2)}, ${light.direction[1].toFixed(2)}, ${light.direction[2].toFixed(2)}], target: [${target[0].toFixed(1)}, ${target[1].toFixed(1)}, ${target[2].toFixed(1)}], angle: ${(angleInRadians * 180 / Math.PI).toFixed(1)}°`);
         }
         return {
-            view: clone$1(this.matrixPool.view),
-            projection: clone$1(this.matrixPool.projection)
+            view: clone$3(this.matrixPool.view),
+            projection: clone$3(this.matrixPool.projection)
         };
     }
     /**
@@ -16920,8 +17030,8 @@ class ShadowMapManager {
         }
         return {
             texture: shadowData.texture,
-            view: clone$1(shadowData.view),
-            projection: clone$1(shadowData.projection)
+            view: clone$3(shadowData.view),
+            projection: clone$3(shadowData.projection)
         };
     }
     createGLResource(creator, resourceName) {
@@ -17309,8 +17419,8 @@ class ShadowMapManager {
         }
         return {
             texture: shadowData.texture,
-            view: clone$1(shadowData.view),
-            projection: clone$1(shadowData.projection),
+            view: clone$3(shadowData.view),
+            projection: clone$3(shadowData.projection),
             lightId: lightId
         };
     }
@@ -17805,16 +17915,15 @@ class InstanceManager {
             }
         }
     }
-    startAnimation(instance, animationName, options) {
-        var _a, _b;
-        const animationState = instance.animationState;
-        animationState.currentAnimation = animationName;
-        animationState.currentTime = 0;
-        animationState.playing = true;
-        if (options) {
-            animationState.speed = (_a = options.speed) !== null && _a !== void 0 ? _a : 1;
-            animationState.loop = (_b = options.loop) !== null && _b !== void 0 ? _b : true;
+    // Public method for Model class to call with blending support
+    startAnimation(model, animationName, options) {
+        const instance = this.instances.get(model.instanceId.id);
+        if (!instance) {
+            console.warn('[InstanceManager] Instance not found:', model.instanceId.id);
+            return;
         }
+        // Use AnimationController's startAnimation which supports blending
+        this.animationController.startAnimation(instance, animationName, options);
     }
     cleanupInstance(instanceId) {
         const instance = this.instances.get(instanceId);

@@ -24,7 +24,7 @@ export declare class AnimationWorkerManager {
         }>;
     }): Promise<void>;
     isModelReady(modelId: string): boolean;
-    requestAnimation(instanceId: number, modelId: string, animationName: string, animationTime: number, loop: boolean, needsBones: boolean, callback: (result: AnimationResult) => void): void;
+    requestAnimation(instanceId: number, modelId: string, animationName: string, animationTime: number, loop: boolean, needsBones: boolean, blendSource: Float32Array | undefined, blendDuration: number | undefined, callback: (result: AnimationResult) => void): void;
     /** @deprecated Use requestAnimation for better performance */
     computeAnimation(instanceId: number, modelId: string, animationName: string, animationTime: number, loop: boolean, needsBones: boolean): Promise<AnimationResult>;
     private handleWorkerMessage;

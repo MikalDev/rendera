@@ -1,4 +1,4 @@
-import { InstanceData, IInstanceManager, IGPUResourceManager, AnimationEventCallback } from './types';
+import { InstanceData, IInstanceManager, IGPUResourceManager, type AnimationOptions, AnimationEventCallback } from './types';
 import { ModelLoader } from './ModelLoader';
 import { Model } from './Model';
 import { AnimationController } from './AnimationController';
@@ -54,7 +54,7 @@ export declare class InstanceManager implements IInstanceManager {
         view: mat4;
         projection: mat4;
     }): void;
-    private startAnimation;
+    startAnimation(model: Model, animationName: string, options?: AnimationOptions): void;
     private cleanupInstance;
     setDebugShadowMap(enabled: boolean): void;
     setUseAnimationWorker(enabled: boolean): void;

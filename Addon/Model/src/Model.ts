@@ -57,15 +57,9 @@ export class Model implements IModel {
     }
 
     public playAnimation(animationName: string, options?: AnimationOptions): void {
-        this._instanceData.animationState.currentAnimation = animationName;
-        this._instanceData.animationState.currentTime = 0;
-        this._instanceData.animationState.playing = true;
-        if (options) {
-            this._instanceData.animationState.speed = options.speed ?? 1;
-            this._instanceData.animationState.loop = options.loop ?? true;
-        }
-        // Still need manager for animation controller access
-        this._manager.invalidateAnimationCache(this.instanceId.id);
+        // Use the manager's startAnimation method which properly handles blending
+        // The manager has access to AnimationController with the new blending logic
+        this._manager.startAnimation(this, animationName, options);
     }
 
     public updateAnimation(deltaTime: number): void {

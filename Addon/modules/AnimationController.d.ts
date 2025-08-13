@@ -29,6 +29,8 @@ export declare class AnimationController {
     private findKeyframeIndices;
     private interpolateValues;
     startAnimation(instance: InstanceData, animationName: string, options?: AnimationOptions): void;
+    private captureCurrentTransforms;
+    private packTransformsForWorker;
     stopAnimation(instance: InstanceData): void;
     invalidateCache(instanceId: number): void;
     registerAnimationCallback(instanceId: number, callback: AnimationEventCallback): void;

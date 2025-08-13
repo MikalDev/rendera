@@ -218,6 +218,8 @@ export class AnimationWorkerManager {
         animationTime: number,
         loop: boolean,
         needsBones: boolean,
+        blendSource: Float32Array | undefined,
+        blendDuration: number | undefined,
         callback: (result: AnimationResult) => void
     ): void {
         if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
@@ -234,8 +236,8 @@ export class AnimationWorkerManager {
             instanceId 
         });
         
-        // Send request immediately without waiting
-        this.worker!.postMessage({
+        // Prepare message and transfers
+        const message: any = {
             type: 'COMPUTE_ANIMATION',
             instanceId,
             requestId,
@@ -244,7 +246,19 @@ export class AnimationWorkerManager {
             animationTime,
             loop,
             needsBones
-        });
+        };
+        
+        const transfers: ArrayBuffer[] = [];
+        
+        // Add blend parameters if provided
+        if (blendSource && blendDuration) {
+            message.blendSource = blendSource;
+            message.blendDuration = blendDuration;
+            transfers.push(blendSource.buffer);
+        }
+        
+        // Send request immediately without waiting
+        this.worker!.postMessage(message, transfers);
     }
     
     // Keep the old method for backward compatibility but mark as deprecated

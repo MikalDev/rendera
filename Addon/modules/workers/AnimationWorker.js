@@ -841,7 +841,7 @@
   };
   // Handle full animation computation request
   function handleComputeAnimation(request) {
-      const { instanceId, requestId, modelId, animationName, animationTime, loop, needsBones } = request;
+      const { instanceId, requestId, modelId, animationName, animationTime, loop, needsBones, blendSource, blendDuration } = request;
       try {
           // Get cached data
           const hierarchy = hierarchyCache.get(modelId);
@@ -871,7 +871,36 @@
           // Update time with looping
           const time = loop ? (animationTime % animation.duration) : Math.min(animationTime, animation.duration);
           // Step 1: Interpolate keyframes to get node transforms
-          const nodeTransforms = interpolateAnimation(animation, hierarchy, time, instanceState.cachedKeyframeIndices);
+          let nodeTransforms = interpolateAnimation(animation, hierarchy, time, instanceState.cachedKeyframeIndices);
+          // Step 1.5: Handle blending
+          // Cache blend state if provided
+          if (blendSource && blendDuration && blendDuration > 0) {
+              // New blend starting - cache it
+              instanceState.blendSource = new Float32Array(blendSource);
+              instanceState.blendDuration = blendDuration;
+              instanceState.blendStartAnimation = animationName;
+          }
+          // Apply cached blend if active
+          if (instanceState.blendSource &&
+              instanceState.blendDuration &&
+              instanceState.blendStartAnimation === animationName) {
+              const blendProgress = Math.min(1, animationTime / instanceState.blendDuration);
+              if (blendProgress < 1) {
+                  nodeTransforms = blendNodeTransforms(instanceState.blendSource, nodeTransforms, blendProgress, hierarchy.nodeCount);
+              }
+              else {
+                  // Blend complete - clear cached state
+                  instanceState.blendSource = undefined;
+                  instanceState.blendDuration = undefined;
+                  instanceState.blendStartAnimation = undefined;
+              }
+          }
+          else if (instanceState.blendStartAnimation !== animationName) {
+              // Different animation started - clear old blend
+              instanceState.blendSource = undefined;
+              instanceState.blendDuration = undefined;
+              instanceState.blendStartAnimation = undefined;
+          }
           // Step 2: Compute hierarchy transforms
           const animationMatrices = computeHierarchyTransforms(nodeTransforms, hierarchy);
           // Step 3: Compute bone matrices if needed (for ALL skins)
@@ -996,6 +1025,30 @@
           lerp(result, start, end, factor);
       }
       return result;
+  }
+  // Simple blend between two sets of node transforms
+  function blendNodeTransforms(sourceTransforms, targetTransforms, blendFactor, nodeCount) {
+      const blended = new Float32Array(nodeCount * 10);
+      for (let i = 0; i < nodeCount; i++) {
+          const offset = i * 10;
+          // Extract source transforms
+          const srcTrans = sourceTransforms.subarray(offset, offset + 3);
+          const srcRot = sourceTransforms.subarray(offset + 3, offset + 7);
+          const srcScale = sourceTransforms.subarray(offset + 7, offset + 10);
+          // Extract target transforms
+          const tgtTrans = targetTransforms.subarray(offset, offset + 3);
+          const tgtRot = targetTransforms.subarray(offset + 3, offset + 7);
+          const tgtScale = targetTransforms.subarray(offset + 7, offset + 10);
+          // Blend translation
+          lerp(blended.subarray(offset, offset + 3), srcTrans, tgtTrans, blendFactor);
+          // Blend rotation (slerp)
+          const blendedRot = blended.subarray(offset + 3, offset + 7);
+          slerp(blendedRot, srcRot, tgtRot, blendFactor);
+          normalize(blendedRot, blendedRot);
+          // Blend scale
+          lerp(blended.subarray(offset + 7, offset + 10), srcScale, tgtScale, blendFactor);
+      }
+      return blended;
   }
   // Compute hierarchy transforms (world matrices)
   function computeHierarchyTransforms(nodeTransforms, hierarchy) {
