@@ -1,6 +1,6 @@
 {
   "name": "model",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "main": "index.js",
   "type": "module",
   "description": "Model addon with shadow mapping support",

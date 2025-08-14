@@ -91,6 +91,8 @@ export interface InstanceData {
     };
     disabledNodes: Set<string>;
     allNodesDisabled: boolean;
+    tintColor: [number, number, number];
+    opacity: number;
 }
 export interface IModelLoader {
     hasModel(modelId: ModelId): boolean;

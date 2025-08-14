@@ -145,4 +145,28 @@ export class Model implements IModel {
         return this._manager;
     }
 
+    /**
+     * Sets the tint color for this model instance.
+     * @param r Red component (0-1)
+     * @param g Green component (0-1) 
+     * @param b Blue component (0-1)
+     */
+    public setTintColor(r: number, g: number, b: number): void {
+        this._instanceData.tintColor = [
+            Math.max(0, Math.min(1, r)),
+            Math.max(0, Math.min(1, g)),
+            Math.max(0, Math.min(1, b))
+        ];
+        this._manager.markInstanceDirty(this.instanceId.id);
+    }
+
+    /**
+     * Sets the opacity for this model instance.
+     * @param opacity Opacity value (0-1, where 0 is transparent and 1 is opaque)
+     */
+    public setOpacity(opacity: number): void {
+        this._instanceData.opacity = Math.max(0, Math.min(1, opacity));
+        this._manager.markInstanceDirty(this.instanceId.id);
+    }
+
 }

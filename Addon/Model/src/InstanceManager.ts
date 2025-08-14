@@ -167,7 +167,9 @@ export class InstanceManager implements IInstanceManager {
             },
             worldMatrix: new Float32Array(16), // 4x4 matrix
             disabledNodes: new Set<string>(),
-            allNodesDisabled: false
+            allNodesDisabled: false,
+            tintColor: [1, 1, 1], // Default white tint (no tinting)
+            opacity: 1 // Default fully opaque
         };
 
         // Store instance
@@ -393,6 +395,12 @@ export class InstanceManager implements IInstanceManager {
                     this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
                     this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
                     this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
+                    
+                    // Set tint and opacity uniforms
+                    const tintLoc = this.uniformCache.getLocation(shader, 'u_TintColor');
+                    const opacityLoc = this.uniformCache.getLocation(shader, 'u_Opacity');
+                    if (tintLoc !== -1) this.gl.uniform3fv(tintLoc, instance.tintColor);
+                    if (opacityLoc !== -1) this.gl.uniform1f(opacityLoc, instance.opacity);
                     
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;

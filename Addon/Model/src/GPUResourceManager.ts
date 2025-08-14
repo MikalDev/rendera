@@ -364,6 +364,8 @@ export class GPUResourceManager implements IGPUResourceManager {
         uniform vec3 u_EmissiveFactor;
         uniform float u_MetallicFactor;
         uniform float u_RoughnessFactor;
+        uniform vec3 u_TintColor;
+        uniform float u_Opacity;
         
         // Global Illumination uniforms (with defaults for safety)
         uniform vec3 u_SkyColor;
@@ -626,6 +628,10 @@ export class GPUResourceManager implements IGPUResourceManager {
             color = color / (color + vec3(1.0)); // Simple Reinhard tone mapping
             color = pow(color, vec3(1.0/2.2));   // Gamma correction
             
+            // Apply tint and opacity
+            color = color * u_TintColor * u_Opacity;
+            float finalAlpha = baseColorSample.a * u_Opacity;
+            
             // Debug: Visualize GI contribution
             // Uncomment one of these lines to debug:
             // fragColor = vec4(hemisphericAmbient, 1.0); // Show only GI
@@ -633,7 +639,7 @@ export class GPUResourceManager implements IGPUResourceManager {
             // fragColor = vec4(vec3(debugUpFactor), 1.0); // Show normal Y mapping (white = up, black = down)
             // fragColor = vec4(u_SkyColor * u_GIIntensity, 1.0); // Show sky color
             
-            fragColor = vec4(color, baseColorSample.a);
+            fragColor = vec4(color, finalAlpha);
         }`;
 
         const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');

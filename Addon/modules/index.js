@@ -14745,6 +14745,8 @@ class GPUResourceManager {
         uniform vec3 u_EmissiveFactor;
         uniform float u_MetallicFactor;
         uniform float u_RoughnessFactor;
+        uniform vec3 u_TintColor;
+        uniform float u_Opacity;
         
         // Global Illumination uniforms (with defaults for safety)
         uniform vec3 u_SkyColor;
@@ -15007,6 +15009,10 @@ class GPUResourceManager {
             color = color / (color + vec3(1.0)); // Simple Reinhard tone mapping
             color = pow(color, vec3(1.0/2.2));   // Gamma correction
             
+            // Apply tint and opacity
+            color = color * u_TintColor * u_Opacity;
+            float finalAlpha = baseColorSample.a * u_Opacity;
+            
             // Debug: Visualize GI contribution
             // Uncomment one of these lines to debug:
             // fragColor = vec4(hemisphericAmbient, 1.0); // Show only GI
@@ -15014,7 +15020,7 @@ class GPUResourceManager {
             // fragColor = vec4(vec3(debugUpFactor), 1.0); // Show normal Y mapping (white = up, black = down)
             // fragColor = vec4(u_SkyColor * u_GIIntensity, 1.0); // Show sky color
             
-            fragColor = vec4(color, baseColorSample.a);
+            fragColor = vec4(color, finalAlpha);
         }`;
         const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'default');
         this.linkUniformBlocks(program);
@@ -15616,6 +15622,28 @@ class Model {
     }
     get manager() {
         return this._manager;
+    }
+    /**
+     * Sets the tint color for this model instance.
+     * @param r Red component (0-1)
+     * @param g Green component (0-1)
+     * @param b Blue component (0-1)
+     */
+    setTintColor(r, g, b) {
+        this._instanceData.tintColor = [
+            Math.max(0, Math.min(1, r)),
+            Math.max(0, Math.min(1, g)),
+            Math.max(0, Math.min(1, b))
+        ];
+        this._manager.markInstanceDirty(this.instanceId.id);
+    }
+    /**
+     * Sets the opacity for this model instance.
+     * @param opacity Opacity value (0-1, where 0 is transparent and 1 is opaque)
+     */
+    setOpacity(opacity) {
+        this._instanceData.opacity = Math.max(0, Math.min(1, opacity));
+        this._manager.markInstanceDirty(this.instanceId.id);
     }
 }
 
@@ -17627,7 +17655,9 @@ class InstanceManager {
             },
             worldMatrix: new Float32Array(16), // 4x4 matrix
             disabledNodes: new Set(),
-            allNodesDisabled: false
+            allNodesDisabled: false,
+            tintColor: [1, 1, 1], // Default white tint (no tinting)
+            opacity: 1 // Default fully opaque
         };
         // Store instance
         this.instances.set(instanceId.id, instanceData);
@@ -17801,6 +17831,13 @@ class InstanceManager {
                     this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
                     this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
                     this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
+                    // Set tint and opacity uniforms
+                    const tintLoc = this.uniformCache.getLocation(shader, 'u_TintColor');
+                    const opacityLoc = this.uniformCache.getLocation(shader, 'u_Opacity');
+                    if (tintLoc !== -1)
+                        this.gl.uniform3fv(tintLoc, instance.tintColor);
+                    if (opacityLoc !== -1)
+                        this.gl.uniform1f(opacityLoc, instance.opacity);
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;
                     const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);

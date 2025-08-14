@@ -44,5 +44,17 @@ export declare class Model implements IModel {
      */
     isNodeEnabled(nodeName: string): boolean;
     get manager(): IInstanceManager;
+    /**
+     * Sets the tint color for this model instance.
+     * @param r Red component (0-1)
+     * @param g Green component (0-1)
+     * @param b Blue component (0-1)
+     */
+    setTintColor(r: number, g: number, b: number): void;
+    /**
+     * Sets the opacity for this model instance.
+     * @param opacity Opacity value (0-1, where 0 is transparent and 1 is opaque)
+     */
+    setOpacity(opacity: number): void;
 }
 //# sourceMappingURL=Model.d.ts.map

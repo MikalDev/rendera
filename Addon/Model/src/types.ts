@@ -131,6 +131,8 @@ export interface InstanceData {
     };
     disabledNodes: Set<string>;
     allNodesDisabled: boolean;
+    tintColor: [number, number, number]; // RGB 0-1
+    opacity: number; // 0-1
 }
 
 // Main class interfaces
