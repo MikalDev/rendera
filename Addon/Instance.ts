@@ -159,20 +159,46 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	}
 	
 	// Animation event callback API for Rendera-Control
-	public registerAnimationCallback(instanceId: number, callback: any): void {
+	public registerAnimationCallback(instanceId: any, callback: any): void {
+		// Extract numeric ID if needed
+		let numericId: number;
+		if (typeof instanceId === 'number') {
+			numericId = instanceId;
+		} else if (instanceId && typeof instanceId.id === 'number') {
+			numericId = instanceId.id;
+		} else if (instanceId && typeof instanceId.instanceId === 'object' && typeof instanceId.instanceId.id === 'number') {
+			numericId = instanceId.instanceId.id;
+		} else {
+			console.error('[rendera] Cannot extract numeric instanceId from:', instanceId);
+			return;
+		}
+		
 		if (!this.instanceManager) {
 			console.warn('[rendera] Cannot register animation callback - instanceManager not initialized');
 			return;
 		}
-		this.instanceManager.registerAnimationCallback(instanceId, callback);
+		this.instanceManager.registerAnimationCallback(numericId, callback);
 	}
 	
-	public unregisterAnimationCallback(instanceId: number): void {
+	public unregisterAnimationCallback(instanceId: any): void {
+		// Extract numeric ID if needed
+		let numericId: number;
+		if (typeof instanceId === 'number') {
+			numericId = instanceId;
+		} else if (instanceId && typeof instanceId.id === 'number') {
+			numericId = instanceId.id;
+		} else if (instanceId && typeof instanceId.instanceId === 'object' && typeof instanceId.instanceId.id === 'number') {
+			numericId = instanceId.instanceId.id;
+		} else {
+			console.error('[rendera] Cannot extract numeric instanceId from:', instanceId);
+			return;
+		}
+		
 		if (!this.instanceManager) {
 			console.warn('[rendera] Cannot unregister animation callback - instanceManager not initialized');
 			return;
 		}
-		this.instanceManager.unregisterAnimationCallback(instanceId);
+		this.instanceManager.unregisterAnimationCallback(numericId);
 	}
 };
 

@@ -174,7 +174,6 @@ export type BufferUsage = WebGL2RenderingContext['STATIC_DRAW'] | WebGL2Renderin
 export declare enum AnimationEventType {
     LOOP = "loop",
     COMPLETE = "complete",
-    FRAME = "frame",
     START = "start",
     STOP = "stop"
 }

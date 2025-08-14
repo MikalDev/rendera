@@ -404,15 +404,8 @@ export class AnimationController {
             }
         }
         
-        // Always fire frame event
-        this.fireAnimationEvent(
-            instanceId,
-            AnimationEventType.FRAME,
-            animationName,
-            finalTime,
-            duration,
-            modelId
-        );
+        // Frame events removed - too noisy for most use cases
+        // Users can track animation progress via start/complete/loop events
         
         this.previousAnimationTimes.set(instanceId, finalTime);
         return finalTime;
@@ -829,6 +822,10 @@ export class AnimationController {
             progress: duration > 0 ? currentTime / duration : 0
         };
         
-        callback(eventData);
+        try {
+            callback(eventData);
+        } catch (error) {
+            console.error(`[AnimationController] Error in animation callback:`, error);
+        }
     }
 }

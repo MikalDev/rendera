@@ -6800,7 +6800,6 @@ var AnimationEventType;
 (function (AnimationEventType) {
     AnimationEventType["LOOP"] = "loop";
     AnimationEventType["COMPLETE"] = "complete";
-    AnimationEventType["FRAME"] = "frame";
     AnimationEventType["START"] = "start";
     AnimationEventType["STOP"] = "stop";
 })(AnimationEventType || (AnimationEventType = {}));
@@ -16178,8 +16177,8 @@ class AnimationController {
                 this.fireAnimationEvent(instanceId, AnimationEventType.COMPLETE, animationName, finalTime, duration, modelId);
             }
         }
-        // Always fire frame event
-        this.fireAnimationEvent(instanceId, AnimationEventType.FRAME, animationName, finalTime, duration, modelId);
+        // Frame events removed - too noisy for most use cases
+        // Users can track animation progress via start/complete/loop events
         this.previousAnimationTimes.set(instanceId, finalTime);
         return finalTime;
     }
@@ -16496,7 +16495,12 @@ class AnimationController {
             duration,
             progress: duration > 0 ? currentTime / duration : 0
         };
-        callback(eventData);
+        try {
+            callback(eventData);
+        }
+        catch (error) {
+            console.error(`[AnimationController] Error in animation callback:`, error);
+        }
     }
 }
 
