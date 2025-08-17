@@ -15650,7 +15650,7 @@ class Model {
 class AnimationWorkerManager {
     constructor() {
         this.workers = [];
-        this.workerCount = 4;
+        this.workerCount = 8;
         this.pendingRequests = new Map();
         this.isInitialized = false;
         this.workerReadyStates = [];

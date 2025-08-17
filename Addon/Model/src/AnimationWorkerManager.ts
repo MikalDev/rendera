@@ -16,7 +16,7 @@ interface AnimationResult {
 
 export class AnimationWorkerManager {
     private workers: Worker[] = [];
-    private workerCount: number = 4;
+    private workerCount: number = 8;
     private pendingRequests = new Map<number, WorkerRequest>();
     private isInitialized = false;
     private workerReadyStates: boolean[] = [];
