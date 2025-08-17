@@ -24,16 +24,21 @@ export class AnimationController {
         this.modelLoader = modelLoader;
     }
 
-    public setUseWorker(enabled: boolean): void {
+    public async setUseWorker(enabled: boolean): Promise<void> {
         this.useWorker = enabled;
         
         // Initialize or terminate worker based on setting
         if (enabled) {
             if (!this.workerManager) {
                 this.workerManager = new AnimationWorkerManager();
-                this.workerManager.initialize().catch((error) => {
+                try {
+                    await this.workerManager.initialize();
+                } catch (error) {
                     console.error('[AnimationController] Worker initialization failed:', error);
-                });
+                    // Clean up on failure
+                    this.workerManager = null;
+                    this.useWorker = false;
+                }
             }
         } else {
             if (this.workerManager) {
@@ -825,7 +830,7 @@ export class AnimationController {
         try {
             callback(eventData);
         } catch (error) {
-            console.error(`[AnimationController] Error in animation callback:`, error);
+            // Silently handle callback errors to avoid console spam
         }
     }
 }

@@ -141,17 +141,12 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		return this._lastLoadedModelPath;
 	}
 
-	public setUseAnimationWorker(enabled: boolean): void {
-		console.log(`[rendera] setUseAnimationWorker called with enabled=${enabled}`);
+	public async setUseAnimationWorker(enabled: boolean): Promise<void> {
 		this._useAnimationWorker = enabled;
 		// Update instance manager's animation controller
 		if (this.instanceManager) {
-			console.log('[rendera] Calling instanceManager.setUseAnimationWorker');
-			this.instanceManager.setUseAnimationWorker(enabled);
-		} else {
-			console.warn('[rendera] instanceManager is not initialized yet');
+			await this.instanceManager.setUseAnimationWorker(enabled);
 		}
-		console.log(`[rendera] Animation worker ${enabled ? 'enabled' : 'disabled'}`);
 	}
 
 	public getUseAnimationWorker(): boolean {

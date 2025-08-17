@@ -57,7 +57,7 @@ export declare class InstanceManager implements IInstanceManager {
     startAnimation(model: Model, animationName: string, options?: AnimationOptions): void;
     private cleanupInstance;
     setDebugShadowMap(enabled: boolean): void;
-    setUseAnimationWorker(enabled: boolean): void;
+    setUseAnimationWorker(enabled: boolean): Promise<void>;
     registerAnimationCallback(instanceId: number, callback: AnimationEventCallback): void;
     unregisterAnimationCallback(instanceId: number): void;
     private cacheModelInWorkerIfNeeded;

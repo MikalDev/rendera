@@ -114,6 +114,24 @@ export const SAMPLER_TEXTURE_UNIT_MAP: Record<string, number> = {
     // Add more samplers here as needed
 };
 
+// Shadow mapping
+export class ShadowAtlasSlot {
+    readonly index: number;      // 0-15 for 4x4 grid
+    readonly pixelOffset: [number, number];  // Pixel offset for viewport
+    readonly resolution: number; // 1024 for now (each slot in 4K atlas)
+    
+    constructor(index: number) {
+        if (index < 0 || index > 15) {
+            throw new Error(`Shadow atlas slot index must be 0-15, got ${index}`);
+        }
+        this.index = index;
+        const row = Math.floor(index / 4);
+        const col = index % 4;
+        this.pixelOffset = [col * 1024, row * 1024];
+        this.resolution = 1024;
+    }
+}
+
 // Animation
 
 export type SkeletalTransformType = 'translation' | 'rotation' | 'scale';
@@ -149,6 +167,8 @@ export interface IModelLoader {
 export interface IGPUResourceCache {
     cacheModelMode(): void;
     restoreModelMode(): void;
+    cacheShadowMapState(): void;
+    restoreShadowMapState(): void;
 }
 
 export interface IInstanceManager {

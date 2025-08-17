@@ -597,9 +597,8 @@ export class InstanceManager implements IInstanceManager {
         this.debugShadowMap = enabled;
     }
 
-    public setUseAnimationWorker(enabled: boolean): void {
-        console.log(`[InstanceManager] setUseAnimationWorker called with enabled=${enabled}`);
-        this._animationController.setUseWorker(enabled);
+    public async setUseAnimationWorker(enabled: boolean): Promise<void> {
+        await this._animationController.setUseWorker(enabled);
     }
     
     // Animation event callback methods
@@ -623,7 +622,6 @@ export class InstanceManager implements IInstanceManager {
         // Cache the model data in the worker
         try {
             await this._animationController.cacheModelInWorker(modelId);
-            console.log(`[InstanceManager] Cached model ${modelId} in worker`);
         } catch (error) {
             console.error(`[InstanceManager] Failed to cache model ${modelId} in worker:`, error);
             // Remove from cache set so it can be retried

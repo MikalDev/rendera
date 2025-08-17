@@ -9,7 +9,7 @@ export declare class AnimationController {
     private previousAnimationTimes;
     private previousAnimationNames;
     constructor(modelLoader: ModelLoader);
-    setUseWorker(enabled: boolean): void;
+    setUseWorker(enabled: boolean): Promise<void>;
     cacheModelInWorker(modelId: string): Promise<void>;
     private fastSceneTraverse;
     private updateNodeLocalTransforms;

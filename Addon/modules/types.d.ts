@@ -78,6 +78,12 @@ export interface MaterialData {
     uniforms?: Record<string, number | boolean | number[]>;
 }
 export declare const SAMPLER_TEXTURE_UNIT_MAP: Record<string, number>;
+export declare class ShadowAtlasSlot {
+    readonly index: number;
+    readonly pixelOffset: [number, number];
+    readonly resolution: number;
+    constructor(index: number);
+}
 export type SkeletalTransformType = 'translation' | 'rotation' | 'scale';
 export type InterpolationType = 'LINEAR' | 'STEP' | 'CUBICSPLINE';
 export interface InstanceData {
@@ -106,6 +112,8 @@ export interface IModelLoader {
 export interface IGPUResourceCache {
     cacheModelMode(): void;
     restoreModelMode(): void;
+    cacheShadowMapState(): void;
+    restoreShadowMapState(): void;
 }
 export interface IInstanceManager {
     updateModelAnimation(instance: Model, deltaTime: number): void;

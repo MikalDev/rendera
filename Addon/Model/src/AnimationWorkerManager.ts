@@ -15,23 +15,54 @@ interface AnimationResult {
 }
 
 export class AnimationWorkerManager {
-    private worker: Worker | null = null;
+    private workers: Worker[] = [];
+    private workerCount: number = 4;
     private pendingRequests = new Map<number, WorkerRequest>();
     private isInitialized = false;
-    private isWorkerReady = false;
+    private workerReadyStates: boolean[] = [];
     private requestCounter = 0;
     private cachedModels = new Set<string>();
     private instanceCache = new Map<number, { modelId: string; lastTime: number; }>();
+    private pendingCacheRequests: Array<{
+        modelId: string;
+        modelData: any;
+        resolve: () => void;
+        reject: (error: Error) => void;
+    }> = [];
     
     constructor() {
         // No runtime needed with standard Worker API
     }
     
-    // Initialize worker (called when animation worker is enabled)
+    private areAllWorkersReady(): boolean {
+        return this.workerReadyStates.length === this.workerCount && 
+               this.workerReadyStates.every(ready => ready);
+    }
+    
+    private async processPendingCacheRequests(): Promise<void> {
+        if (this.pendingCacheRequests.length === 0) return;
+        
+        
+        // Process all pending requests
+        const requests = [...this.pendingCacheRequests];
+        this.pendingCacheRequests = [];
+        
+        for (const request of requests) {
+            try {
+                await this.cacheModelInternal(request.modelId, request.modelData);
+                request.resolve();
+            } catch (error) {
+                request.reject(error as Error);
+            }
+        }
+    }
+    
+    // Initialize workers (called when animation worker is enabled)
     public async initialize(): Promise<void> {
         if (this.isInitialized) {
             return;
         }
+        
         
         try {
             // Simple worker URL resolution - relative to the HTML page
@@ -45,38 +76,63 @@ export class AnimationWorkerManager {
                 workerUrl = '/scripts/plugins/rendera/c3runtime/modules/workers/AnimationWorker.js';
             }
             
+            // Initialize worker arrays
+            this.workers = [];
+            this.workerReadyStates = [];
             
-            try {
-                this.worker = new Worker(workerUrl);
-                
-                // Set up message handler
-                this.worker.onmessage = (event) => {
-                    // Check for ready message
-                    if (event.data.type === 'WORKER_READY') {
-                        this.isWorkerReady = true;
+            // Create all workers in parallel
+            const workerPromises: Promise<void>[] = [];
+            
+            for (let i = 0; i < this.workerCount; i++) {
+                const workerPromise = new Promise<void>((resolve, reject) => {
+                    try {
+                        const worker = new Worker(workerUrl);
+                        const workerIndex = i;
+                        
+                        // Initialize ready state
+                        this.workerReadyStates[workerIndex] = false;
+                        
+                        // Set up message handler with worker index
+                        worker.onmessage = (event) => {
+                            // Check for ready message
+                            if (event.data.type === 'WORKER_READY') {
+                                this.workerReadyStates[workerIndex] = true;
+                                resolve();
+                            }
+                            
+                            this.handleWorkerMessage(event);
+                        };
+                        
+                        worker.onerror = (error) => {
+                            console.error(`[AnimationWorkerManager] Worker ${workerIndex} error:`, error);
+                            console.error('[AnimationWorkerManager] Worker URL was:', workerUrl);
+                            this.handleWorkerError(error);
+                            reject(error);
+                        };
+                        
+                        this.workers[workerIndex] = worker;
+                        
+                    } catch (err) {
+                        console.error(`[AnimationWorkerManager] Failed to create worker ${i}:`, err);
+                        reject(err);
                     }
-                    
-                    this.handleWorkerMessage(event);
-                };
+                });
                 
-                this.worker.onerror = (error) => {
-                    console.error('[AnimationWorkerManager] Worker error event:', error);
-                    console.error('[AnimationWorkerManager] Worker URL was:', workerUrl);
-                    console.error('[AnimationWorkerManager] Error type:', error.type);
-                    console.error('[AnimationWorkerManager] Error filename:', (error as any).filename);
-                    console.error('[AnimationWorkerManager] Error lineno:', (error as any).lineno);
-                    console.error('[AnimationWorkerManager] Error message:', (error as any).message);
-                    this.handleWorkerError(error);
-                };
-                
-                this.isInitialized = true;
-            } catch (err) {
-                console.error('[AnimationWorkerManager] Failed to create worker:', err);
-                throw err;
+                workerPromises.push(workerPromise);
             }
+            
+            // Wait for all workers to be ready
+            await Promise.all(workerPromises);
+            
+            this.isInitialized = true;
+            
+            // Process any pending cache requests
+            await this.processPendingCacheRequests();
+            
         } catch (error) {
-            console.error('[AnimationWorkerManager] Failed to initialize worker:', error);
-            // Don't throw - just mark as not initialized
+            console.error('[AnimationWorkerManager] Failed to initialize workers:', error);
+            // Clean up any partially created workers
+            this.terminate();
             this.isInitialized = false;
         }
     }
@@ -94,14 +150,38 @@ export class AnimationWorkerManager {
             }>;
         }
     ): Promise<void> {
-        if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
-            throw new Error('AnimationWorker not ready');
-        }
-        
         if (this.cachedModels.has(modelId)) {
             return; // Already cached
         }
         
+        if (!this.isInitialized || !this.areAllWorkersReady()) {
+            // Queue the request for when workers are ready
+            return new Promise((resolve, reject) => {
+                this.pendingCacheRequests.push({
+                    modelId,
+                    modelData,
+                    resolve,
+                    reject
+                });
+            });
+        }
+        
+        // Delegate to internal method that does the actual work
+        return this.cacheModelInternal(modelId, modelData);
+    }
+    
+    private async cacheModelInternal(
+        modelId: string,
+        modelData: {
+            nodes: Node[];
+            animations: Map<string, Animation>;
+            skins: Array<{
+                nodeIndex: number;
+                inverseBindMatrices: Float32Array;
+                jointIndices: Uint16Array;
+            }>;
+        }
+    ): Promise<void> {
         // Prepare hierarchy data
         const nodeCount = modelData.nodes.length;
         const parentIndices = new Int32Array(nodeCount);
@@ -177,30 +257,83 @@ export class AnimationWorkerManager {
         });
         
         return new Promise((resolve) => {
-            // Send everything in one message
-            this.worker!.postMessage({
-                type: 'CACHE_MODEL',
-                modelId,
-                hierarchy: {
-                    nodeCount,
-                    parentIndices,
-                    bindPoseTransforms
-                },
-                animations: animationBatch,
-                skins: skinsData
-            }, transfers);
+            // Send model data to ALL workers
+            const cachePromises: Promise<void>[] = [];
             
-            // Mark as cached immediately
-            this.cachedModels.add(modelId);
-            
-            // Wait for confirmation
-            const handler = (event: MessageEvent) => {
-                if (event.data.type === 'MODEL_CACHED' && event.data.modelId === modelId) {
-                    this.worker!.removeEventListener('message', handler);
-                    resolve();
+            for (let workerIndex = 0; workerIndex < this.workers.length; workerIndex++) {
+                const worker = this.workers[workerIndex];
+                
+                // Create separate data copies for each worker (ArrayBuffers can only be transferred once)
+                const workerParentIndices = new Int32Array(parentIndices);
+                const workerBindPoseTransforms = new Float32Array(bindPoseTransforms);
+                const workerTransfers: ArrayBuffer[] = [
+                    workerParentIndices.buffer,
+                    workerBindPoseTransforms.buffer
+                ];
+                
+                // Copy animation data for this worker
+                const workerAnimationBatch = animationBatch.map(anim => ({
+                    name: anim.name,
+                    channels: anim.channels.map((channel: any) => ({
+                        nodeIndex: channel.nodeIndex,
+                        targetPath: channel.targetPath,
+                        times: new Float32Array(channel.times),
+                        values: new Float32Array(channel.values)
+                    }))
+                }));
+                
+                // Add animation transfers for this worker
+                for (const anim of workerAnimationBatch) {
+                    for (const channel of anim.channels) {
+                        workerTransfers.push(channel.times.buffer, channel.values.buffer);
+                    }
                 }
-            };
-            this.worker!.addEventListener('message', handler);
+                
+                // Copy skins data for this worker
+                const workerSkinsData = skinsData.map(skin => ({
+                    nodeIndex: skin.nodeIndex,
+                    inverseBindMatrices: new Float32Array(skin.inverseBindMatrices),
+                    jointIndices: new Uint16Array(skin.jointIndices)
+                }));
+                
+                // Add skin transfers for this worker
+                for (const skin of workerSkinsData) {
+                    workerTransfers.push(skin.inverseBindMatrices.buffer, skin.jointIndices.buffer);
+                }
+                
+                // Create promise for this worker
+                const workerPromise = new Promise<void>((workerResolve) => {
+                    const handler = (event: MessageEvent) => {
+                        if (event.data.type === 'MODEL_CACHED' && event.data.modelId === modelId) {
+                            worker.removeEventListener('message', handler);
+                            workerResolve();
+                        }
+                    };
+                    worker.addEventListener('message', handler);
+                });
+                
+                // Send message to this worker
+                worker.postMessage({
+                    type: 'CACHE_MODEL',
+                    modelId,
+                    hierarchy: {
+                        nodeCount,
+                        parentIndices: workerParentIndices,
+                        bindPoseTransforms: workerBindPoseTransforms
+                    },
+                    animations: workerAnimationBatch,
+                    skins: workerSkinsData
+                }, workerTransfers);
+                
+                cachePromises.push(workerPromise);
+            }
+            
+            // Wait for all workers to confirm caching
+            Promise.all(cachePromises).then(() => {
+                // Mark as cached only after all workers confirm
+                this.cachedModels.add(modelId);
+                resolve();
+            });
         });
     }
     
@@ -208,6 +341,21 @@ export class AnimationWorkerManager {
     // Check if model is cached and ready for animation
     public isModelReady(modelId: string): boolean {
         return this.cachedModels.has(modelId);
+    }
+    
+    // Debug method to check worker pool status
+    public getWorkerPoolStatus(): { 
+        workerCount: number; 
+        workersInitialized: number; 
+        allReady: boolean; 
+        isInitialized: boolean;
+    } {
+        return {
+            workerCount: this.workerCount,
+            workersInitialized: this.workers.length,
+            allReady: this.areAllWorkersReady(),
+            isInitialized: this.isInitialized
+        };
     }
     
     // Fire-and-forget animation request with callback
@@ -222,12 +370,15 @@ export class AnimationWorkerManager {
         blendDuration: number | undefined,
         callback: (result: AnimationResult) => void
     ): void {
-        if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
-            console.warn('[AnimationWorkerManager] Worker not ready for animation request');
+        if (this.workers.length === 0 || !this.isInitialized || !this.areAllWorkersReady()) {
             return;
         }
         
         const requestId = ++this.requestCounter;
+        
+        // Select worker using round-robin based on instanceId (KISS approach)
+        const workerIndex = instanceId % this.workers.length;
+        const selectedWorker = this.workers[workerIndex];
         
         // Store callback instead of promise handlers
         this.pendingRequests.set(requestId, { 
@@ -257,8 +408,8 @@ export class AnimationWorkerManager {
             transfers.push(blendSource.buffer);
         }
         
-        // Send request immediately without waiting
-        this.worker!.postMessage(message, transfers);
+        // Send request to selected worker
+        selectedWorker.postMessage(message, transfers);
     }
     
     // Keep the old method for backward compatibility but mark as deprecated
@@ -271,17 +422,21 @@ export class AnimationWorkerManager {
         loop: boolean,
         needsBones: boolean
     ): Promise<AnimationResult> {
-        if (!this.worker || !this.isInitialized || !this.isWorkerReady) {
-            return Promise.reject(new Error('AnimationWorker not ready'));
+        if (this.workers.length === 0 || !this.isInitialized || !this.areAllWorkersReady()) {
+            return Promise.reject(new Error('AnimationWorkers not ready'));
         }
         
         return new Promise((resolve, reject) => {
             const requestId = ++this.requestCounter;
             
+            // Select worker using round-robin based on instanceId (same as requestAnimation)
+            const workerIndex = instanceId % this.workers.length;
+            const selectedWorker = this.workers[workerIndex];
+            
             // Store promise handlers
             this.pendingRequests.set(requestId, { resolve, reject, instanceId });
             
-            this.worker!.postMessage({
+            selectedWorker.postMessage({
                 type: 'COMPUTE_ANIMATION',
                 instanceId,
                 requestId,
@@ -319,22 +474,26 @@ export class AnimationWorkerManager {
     private handleWorkerError(error: ErrorEvent): void {
         console.error('[AnimationWorkerManager] Worker error:', error);
         
-        // Reject all pending requests
-        for (const [timestamp, request] of this.pendingRequests) {
-            request.reject(new Error('Worker error: ' + error.message));
-        }
-        this.pendingRequests.clear();
+        // Individual requests will timeout if the worker becomes unresponsive
+        // This is more robust for multi-worker scenarios where one worker failing
+        // shouldn't kill all animation processing
     }
     
-    // Clean up worker
+    // Clean up workers
     public terminate(): void {
-        if (this.worker) {
-            this.worker.terminate();
-            this.worker = null;
-            this.isInitialized = false;
-            this.isWorkerReady = false;
-            this.pendingRequests.clear();
-            this.instanceCache.clear();
+        for (const worker of this.workers) {
+            worker.terminate();
         }
+        this.workers = [];
+        this.workerReadyStates = [];
+        this.isInitialized = false;
+        this.pendingRequests.clear();
+        this.instanceCache.clear();
+        
+        // Reject any pending cache requests
+        for (const request of this.pendingCacheRequests) {
+            request.reject(new Error('Worker manager terminated'));
+        }
+        this.pendingCacheRequests = [];
     }
 }

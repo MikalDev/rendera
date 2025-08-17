@@ -658,15 +658,8 @@ export class ShadowMapManager {
             return; // Skip disabled or non-existent shadow maps
         }
         
-        // Cache GL state for single shadow map render
-        this.beginShadowMapFrame();
-        
-        try {
-            this.renderShadowMapInternal(lightId, instanceManager);
-        } finally {
-            // Restore GL state
-            this.endShadowMapFrame();
-        }
+        // Render shadow map directly - state management should be handled at frame level
+        this.renderShadowMapInternal(lightId, instanceManager);
     }
 
     /**
@@ -834,83 +827,83 @@ export class ShadowMapManager {
             throw new Error(`No shadow map data found for light ${lightId}`);
         }
 
-        // Cache GL state for debug rendering
+        // Cache GL state for debug rendering (called independently from frame-level management)
         this.beginShadowMapFrame();
 
         try {
-            // Set up state for debug rendering
-            this.gl.disable(this.gl.DEPTH_TEST);
-            this.gl.disable(this.gl.BLEND);
-            this.gl.viewport(0, 0, this.resolution, this.resolution);
+        // Set up state for debug rendering
+        this.gl.disable(this.gl.DEPTH_TEST);
+        this.gl.disable(this.gl.BLEND);
+        this.gl.viewport(0, 0, this.resolution, this.resolution);
 
-            // Check if the shader program is already created
-            if (!this.debugShaderProgram) {
-                const vertexShaderSource = `#version 300 es
-                in vec2 a_position;
-                out vec2 v_texCoord;
-                void main() {
-                    v_texCoord = a_position * 0.5 + 0.5;
-                    gl_Position = vec4(a_position, 0.0, 1.0);
-                }`;
+        // Check if the shader program is already created
+        if (!this.debugShaderProgram) {
+            const vertexShaderSource = `#version 300 es
+            in vec2 a_position;
+            out vec2 v_texCoord;
+            void main() {
+                v_texCoord = a_position * 0.5 + 0.5;
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }`;
 
-                const fragmentShaderSource = `#version 300 es
-                precision highp float;
-                precision highp sampler2DShadow;
-                
-                in vec2 v_texCoord;
-                uniform sampler2DShadow u_depthTexture;
-                out vec4 outColor;
-                
-                void main() {
-                    // Compare with a fixed ref value = 0.5 for demonstration.
-                    // Values in the texture < 0.5 become "1," others become "0," possibly plus PCF if filters are set to LINEAR.
-                    float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.9999999999999999));
-                    outColor = vec4(vec3(shadowResult), 1.0);
-                }`;
-
-                this.debugShaderProgram = this.createShaderProgram(vertexShaderSource, fragmentShaderSource);
-            }
-
-            this.gl.useProgram(this.debugShaderProgram);
-
-            // Bind the shadow map texture
-            this.gl.activeTexture(this.gl.TEXTURE0);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
-            const texLocation = this.gl.getUniformLocation(this.debugShaderProgram, 'u_depthTexture');
-            if (texLocation === null) {
-                throw new Error('Could not find u_depthTexture uniform');
-            }
-            this.gl.uniform1i(texLocation, 0);
-
-            // Create and set up vertex buffer
-            const positionBuffer = this.gl.createBuffer();
-            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
-            const positions = new Float32Array([
-                -1, -1,
-                1, -1,
-                -1, 1,
-                1, 1,
-            ]);
-            this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
-
-            const positionLocation = this.gl.getAttribLocation(this.debugShaderProgram, 'a_position');
-            if (positionLocation === -1) {
-                throw new Error('Could not find a_position attribute');
-            }
-            this.gl.enableVertexAttribArray(positionLocation);
-            this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0);
-
-            // Draw the quad
-            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
-
-            // Clean up
-            this.gl.disableVertexAttribArray(positionLocation);
-            this.gl.deleteBuffer(positionBuffer);
+            const fragmentShaderSource = `#version 300 es
+            precision highp float;
+            precision highp sampler2DShadow;
             
-            // Restore comparison mode
-            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
-            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
+            in vec2 v_texCoord;
+            uniform sampler2DShadow u_depthTexture;
+            out vec4 outColor;
             
+            void main() {
+                // Compare with a fixed ref value = 0.5 for demonstration.
+                // Values in the texture < 0.5 become "1," others become "0," possibly plus PCF if filters are set to LINEAR.
+                float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.9999999999999999));
+                outColor = vec4(vec3(shadowResult), 1.0);
+            }`;
+
+            this.debugShaderProgram = this.createShaderProgram(vertexShaderSource, fragmentShaderSource);
+        }
+
+        this.gl.useProgram(this.debugShaderProgram);
+
+        // Bind the shadow map texture
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
+        const texLocation = this.gl.getUniformLocation(this.debugShaderProgram, 'u_depthTexture');
+        if (texLocation === null) {
+            throw new Error('Could not find u_depthTexture uniform');
+        }
+        this.gl.uniform1i(texLocation, 0);
+
+        // Create and set up vertex buffer
+        const positionBuffer = this.gl.createBuffer();
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
+        const positions = new Float32Array([
+            -1, -1,
+            1, -1,
+            -1, 1,
+            1, 1,
+        ]);
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
+
+        const positionLocation = this.gl.getAttribLocation(this.debugShaderProgram, 'a_position');
+        if (positionLocation === -1) {
+            throw new Error('Could not find a_position attribute');
+        }
+        this.gl.enableVertexAttribArray(positionLocation);
+        this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0);
+
+        // Draw the quad
+        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+        // Clean up
+        this.gl.disableVertexAttribArray(positionLocation);
+        this.gl.deleteBuffer(positionBuffer);
+        
+        // Restore comparison mode
+        this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
+        
         } finally {
             // Restore GL state
             this.endShadowMapFrame();

@@ -94,7 +94,6 @@ export default class ModelCategory {
         ]
     })
     setAnimationWorker(this: Instance, enabled: boolean) {
-        console.log(`[Model Action] setAnimationWorker called with enabled=${enabled}`);
         this.setUseAnimationWorker(enabled);
     }
 
