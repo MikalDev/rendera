@@ -1404,7 +1404,7 @@ Logger.DEFAULT_INSTANCE = new _Logger(_Logger.Verbosity.INFO);
  * @returns {Number} determinant of a
  */
 
-function determinant(a) {
+function determinant$1(a) {
   var a00 = a[0],
       a01 = a[1],
       a02 = a[2],
@@ -1659,7 +1659,7 @@ class MathUtils {
     const sy = length$1([srcMat[4], srcMat[5], srcMat[6]]);
     const sz = length$1([srcMat[8], srcMat[9], srcMat[10]]);
     // if determine is negative, we need to invert one scale
-    const det = determinant(srcMat);
+    const det = determinant$1(srcMat);
     if (det < 0) sx = -sx;
     dstTranslation[0] = srcMat[12];
     dstTranslation[1] = srcMat[13];
@@ -12386,6 +12386,29 @@ function create$4() {
   return out;
 }
 /**
+ * Scales the mat3 by the dimensions in the given vec2
+ *
+ * @param {mat3} out the receiving matrix
+ * @param {ReadonlyMat3} a the matrix to rotate
+ * @param {ReadonlyVec2} v the vec2 to scale the matrix by
+ * @returns {mat3} out
+ **/
+
+function scale$1(out, a, v) {
+  var x = v[0],
+      y = v[1];
+  out[0] = x * a[0];
+  out[1] = x * a[1];
+  out[2] = x * a[2];
+  out[3] = y * a[3];
+  out[4] = y * a[4];
+  out[5] = y * a[5];
+  out[6] = a[6];
+  out[7] = a[7];
+  out[8] = a[8];
+  return out;
+}
+/**
  * Calculates a 3x3 normal matrix (transpose inverse) from the 4x4 matrix
  *
  * @param {mat3} out mat3 receiving operation result
@@ -12662,6 +12685,45 @@ function invert(out, a) {
   out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
   out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
   return out;
+}
+/**
+ * Calculates the determinant of a mat4
+ *
+ * @param {ReadonlyMat4} a the source matrix
+ * @returns {Number} determinant of a
+ */
+
+function determinant(a) {
+  var a00 = a[0],
+      a01 = a[1],
+      a02 = a[2],
+      a03 = a[3];
+  var a10 = a[4],
+      a11 = a[5],
+      a12 = a[6],
+      a13 = a[7];
+  var a20 = a[8],
+      a21 = a[9],
+      a22 = a[10],
+      a23 = a[11];
+  var a30 = a[12],
+      a31 = a[13],
+      a32 = a[14],
+      a33 = a[15];
+  var b00 = a00 * a11 - a01 * a10;
+  var b01 = a00 * a12 - a02 * a10;
+  var b02 = a00 * a13 - a03 * a10;
+  var b03 = a01 * a12 - a02 * a11;
+  var b04 = a01 * a13 - a03 * a11;
+  var b05 = a02 * a13 - a03 * a12;
+  var b06 = a20 * a31 - a21 * a30;
+  var b07 = a20 * a32 - a22 * a30;
+  var b08 = a20 * a33 - a23 * a30;
+  var b09 = a21 * a32 - a22 * a31;
+  var b10 = a21 * a33 - a23 * a31;
+  var b11 = a22 * a33 - a23 * a32; // Calculate the determinant
+
+  return b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
 }
 /**
  * Multiplies two mat4s
@@ -13935,6 +13997,22 @@ class ModelLoader {
             materialSystem: new MaterialSystem(this.gl, SAMPLER_TEXTURE_UNIT_MAP),
             nodeNameMap: new Map()
         };
+        // Apply coordinate system conversion for C3 compatibility
+        // GLB/glTF uses right-handed Y-up, C3 uses left-handed Y-down
+        // Apply conversion matrix to root node: flip Y and Z axes
+        const rootNode = modelData.rootNode;
+        if (rootNode) {
+            const rootMatrix = rootNode.getMatrix() || create$3();
+            // Create conversion matrix: scale(1, -1, -1) to flip Y and Z
+            const conversionMatrix = fromValues$1(1, 0, 0, 0, // X unchanged
+            0, -1, 0, 0, // Flip Y (Y-up to Y-down)
+            0, 0, -1, 0, // Flip Z (right-handed to left-handed)
+            0, 0, 0, 1);
+            // Pre-multiply: newMatrix = conversion * original
+            multiply(rootMatrix, conversionMatrix, rootMatrix);
+            rootNode.setMatrix(rootMatrix);
+            console.log('[ModelLoader] Applied coordinate system conversion to root node');
+        }
         /*
         await Promise.all([
             this.processMeshes(document, modelData),
@@ -14990,11 +15068,11 @@ class GPUResourceManager {
             // Calculate hemispheric ambient GI
             vec3 hemisphericAmbient = vec3(0.0);
             if (u_GIIntensity > 0.0) {
-                // In this coordinate system, Y+ is down, so we need to invert
+                // After coordinate conversion, Y+ points up correctly
                 // Map normal Y component from [-1,1] to [0,1] for blending
-                // When N.y is -1 (pointing up), we want sky color (upFactor = 1)
-                // When N.y is +1 (pointing down), we want ground color (upFactor = 0)
-                float upFactor = (-N.y + 1.0) * 0.5;
+                // When N.y is +1 (pointing up), we want sky color (upFactor = 1)
+                // When N.y is -1 (pointing down), we want ground color (upFactor = 0)
+                float upFactor = (N.y + 1.0) * 0.5;
                 hemisphericAmbient = mix(u_GroundColor, u_SkyColor, upFactor) * u_GIIntensity;
             }
             
@@ -17974,25 +18052,39 @@ class InstanceManager {
                     const normalMatrix = create$4();
                     // Get nodeMatrix from instance from animation matrices
                     const nodeMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    let finalMatrix;
                     if (nodeMatrix) {
                         const nodeWorldMatrix = create$3();
                         multiply(nodeWorldMatrix, nodeMatrix, instance.worldMatrix);
-                        normalFromMat4(normalMatrix, nodeWorldMatrix);
+                        finalMatrix = nodeWorldMatrix;
                     }
                     else {
-                        normalFromMat4(normalMatrix, instance.worldMatrix);
+                        finalMatrix = instance.worldMatrix;
+                    }
+                    // Check determinant for coordinate system flip (negative scale)
+                    const det = determinant(finalMatrix);
+                    normalFromMat4(normalMatrix, finalMatrix);
+                    // If determinant is negative, flip normals to handle coordinate conversion
+                    if (det < 0) {
+                        scale$1(normalMatrix, normalMatrix, [-1, -1, -1]);
                     }
                     const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
                     this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);
                     // 5. Bind material properties (textures and uniforms)
                     this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, primitive.material, modelData);
-                    // 6. Draw
+                    // 6. Handle winding order for coordinate conversion
+                    // Since we flip Y and Z axes (2 flips), triangle winding is reversed
+                    // Switch from CCW (default) to CW for proper culling
+                    this.gl.frontFace(this.gl.CW);
+                    // 7. Draw
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
                     }
                     else {
                         this.gl.drawArrays(this.gl.TRIANGLES, 0, primitive.vertexCount);
                     }
+                    // Reset to default winding order
+                    this.gl.frontFace(this.gl.CCW);
                 }
             }
         }
@@ -18057,6 +18149,8 @@ class InstanceManager {
                     if (useSkinningLoc) {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
                     }
+                    // Handle winding order for coordinate conversion in shadow maps too
+                    this.gl.frontFace(this.gl.CW);
                     // Draw
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
@@ -18064,6 +18158,8 @@ class InstanceManager {
                     else {
                         this.gl.drawArrays(this.gl.TRIANGLES, 0, primitive.vertexCount);
                     }
+                    // Reset to default winding order
+                    this.gl.frontFace(this.gl.CCW);
                 }
             }
         }

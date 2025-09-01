@@ -133,6 +133,28 @@ export class ModelLoader implements IModelLoader {
             nodeNameMap: new Map<string, ExtendedNode>()
         };
 
+        // Apply coordinate system conversion for C3 compatibility
+        // GLB/glTF uses right-handed Y-up, C3 uses left-handed Y-down
+        // Apply conversion matrix to root node: flip Y and Z axes
+        const rootNode = modelData.rootNode;
+        if (rootNode) {
+            const rootMatrix = rootNode.getMatrix() || mat4.create();
+            
+            // Create conversion matrix: scale(1, -1, -1) to flip Y and Z
+            const conversionMatrix = mat4.fromValues(
+                1,  0,  0,  0,  // X unchanged
+                0, -1,  0,  0,  // Flip Y (Y-up to Y-down)
+                0,  0, -1,  0,  // Flip Z (right-handed to left-handed)
+                0,  0,  0,  1
+            );
+            
+            // Pre-multiply: newMatrix = conversion * original
+            mat4.multiply(rootMatrix, conversionMatrix, rootMatrix);
+            rootNode.setMatrix(rootMatrix);
+            
+            console.log('[ModelLoader] Applied coordinate system conversion to root node');
+        }
+
         /*
         await Promise.all([
             this.processMeshes(document, modelData),

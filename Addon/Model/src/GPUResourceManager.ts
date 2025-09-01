@@ -609,11 +609,11 @@ export class GPUResourceManager implements IGPUResourceManager {
             // Calculate hemispheric ambient GI
             vec3 hemisphericAmbient = vec3(0.0);
             if (u_GIIntensity > 0.0) {
-                // In this coordinate system, Y+ is down, so we need to invert
+                // After coordinate conversion, Y+ points up correctly
                 // Map normal Y component from [-1,1] to [0,1] for blending
-                // When N.y is -1 (pointing up), we want sky color (upFactor = 1)
-                // When N.y is +1 (pointing down), we want ground color (upFactor = 0)
-                float upFactor = (-N.y + 1.0) * 0.5;
+                // When N.y is +1 (pointing up), we want sky color (upFactor = 1)
+                // When N.y is -1 (pointing down), we want ground color (upFactor = 0)
+                float upFactor = (N.y + 1.0) * 0.5;
                 hemisphericAmbient = mix(u_GroundColor, u_SkyColor, upFactor) * u_GIIntensity;
             }
             

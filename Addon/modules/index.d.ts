@@ -10,6 +10,9 @@ export * from './draco_decoder_gltf';
 /// <reference path="./errors.d.ts" />
 export * from './errors';
 
+/// <reference path="./Frustum.d.ts" />
+export * from './Frustum';
+
 /// <reference path="./GPUResourceCache.d.ts" />
 export * from './GPUResourceCache';
 

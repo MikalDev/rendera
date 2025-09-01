@@ -427,12 +427,23 @@ export class InstanceManager implements IInstanceManager {
                     const normalMatrix = mat3.create();
                     // Get nodeMatrix from instance from animation matrices
                     const nodeMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    let finalMatrix: mat4;
+                    
                     if (nodeMatrix) {
                         const nodeWorldMatrix = mat4.create();
                         mat4.multiply(nodeWorldMatrix, nodeMatrix, instance.worldMatrix);
-                        mat3.normalFromMat4(normalMatrix, nodeWorldMatrix);
+                        finalMatrix = nodeWorldMatrix;
                     } else {
-                        mat3.normalFromMat4(normalMatrix, instance.worldMatrix);
+                        finalMatrix = instance.worldMatrix;
+                    }
+                    
+                    // Check determinant for coordinate system flip (negative scale)
+                    const det = mat4.determinant(finalMatrix);
+                    mat3.normalFromMat4(normalMatrix, finalMatrix);
+                    
+                    // If determinant is negative, flip normals to handle coordinate conversion
+                    if (det < 0) {
+                        mat3.scale(normalMatrix, normalMatrix, [-1, -1, -1]);
                     }
 
                     const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
@@ -441,7 +452,12 @@ export class InstanceManager implements IInstanceManager {
                     // 5. Bind material properties (textures and uniforms)
                     this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, primitive.material, modelData);
 
-                    // 6. Draw
+                    // 6. Handle winding order for coordinate conversion
+                    // Since we flip Y and Z axes (2 flips), triangle winding is reversed
+                    // Switch from CCW (default) to CW for proper culling
+                    this.gl.frontFace(this.gl.CW);
+                    
+                    // 7. Draw
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(
                             this.gl.TRIANGLES,
@@ -456,6 +472,9 @@ export class InstanceManager implements IInstanceManager {
                             primitive.vertexCount
                         );
                     }
+                    
+                    // Reset to default winding order
+                    this.gl.frontFace(this.gl.CCW);
                 }
             }
         }
@@ -535,6 +554,9 @@ export class InstanceManager implements IInstanceManager {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
                     }
 
+                    // Handle winding order for coordinate conversion in shadow maps too
+                    this.gl.frontFace(this.gl.CW);
+                    
                     // Draw
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(
@@ -550,6 +572,9 @@ export class InstanceManager implements IInstanceManager {
                             primitive.vertexCount
                         );
                     }
+                    
+                    // Reset to default winding order
+                    this.gl.frontFace(this.gl.CCW);
                 }
             }
         }
