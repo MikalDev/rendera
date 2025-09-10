@@ -26,6 +26,11 @@ export interface ExtendedNode extends Node {
 
 export type Nullable<T> = T | null;
 
+export interface BoundingSphere {
+    center: [number, number, number];
+    radius: number;
+}
+
 export interface INodeHierarchy {
     getWorldMatrix(): Float32Array;
     getChildren(): Node[];
@@ -235,6 +240,7 @@ export interface ModelData {
     materialSystem: MaterialSystem;
     nodeArray?: Node[];
     nodeNameMap: Map<string, ExtendedNode>;
+    boundingSphere?: BoundingSphere;
 }
 
 export interface JointData {

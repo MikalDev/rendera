@@ -13897,7 +13897,6 @@ class ModelLoader {
     }
     async createWebIO() {
         const dracoDecoder = await DracoDecoderModule();
-        console.log('ModelLoader: dracoDecoder loaded');
         this.webio = new WebIO()
             .registerExtensions([...ALL_EXTENSIONS])
             .registerDependencies({
@@ -13952,9 +13951,10 @@ class ModelLoader {
             console.error('[rendera] ModelLoader: processModel - modelData not found', modelId.id);
             return false;
         }
+        // Calculate KISS bounding sphere from all vertex positions
+        modelData.boundingSphere = this.calculateBoundingSphere(modelData);
         // Store model data
         this.loadedModels.set(modelId.id, modelData);
-        console.info('[rendera] ModelLoader: processModel - modelData loaded', modelId.id);
         return true;
     }
     get pendingDocuments() {
@@ -13964,7 +13964,6 @@ class ModelLoader {
         const pendingDocuments = this.pendingDocuments;
         if (pendingDocuments.size === 0)
             return 0;
-        console.log('[rendera] ModelLoader: processPendingDocuments', this.pendingDocuments.size);
         let count = 0;
         for (const [id, _document] of pendingDocuments.entries()) {
             const modelId = { id };
@@ -14011,7 +14010,6 @@ class ModelLoader {
             // Pre-multiply: newMatrix = conversion * original
             multiply(rootMatrix, conversionMatrix, rootMatrix);
             rootNode.setMatrix(rootMatrix);
-            console.log('[ModelLoader] Applied coordinate system conversion to root node');
         }
         /*
         await Promise.all([
@@ -14021,18 +14019,12 @@ class ModelLoader {
             this.processJoints(document, modelData)
         ]);
         */
-        console.log('ModelLoader: processDocument');
         this.gpuResources.gpuResourceCache.cacheModelMode();
         // Process each component sequentially for easier debugging
-        console.log('ModelLoader: processAnimations', modelData);
         await this.processJoints(document, modelData);
-        console.log('ModelLoader: processJoints', modelData);
         await this.processRenderableNodes(document, modelData);
-        console.log('ModelLoader: processRenderableNodes', modelData);
         this.gpuResources.gpuResourceCache.restoreModelMode();
         await this.processMaterials(document, modelData);
-        console.log('ModelLoader: processMaterials', modelData);
-        console.log('ModelLoader: processDocument', modelData);
         await this.processAnimations(document, modelData);
         return modelData;
     }
@@ -14112,16 +14104,13 @@ class ModelLoader {
             const buffer = this.createAttributeBuffer(accessor);
             attributes[semantic] = buffer;
             const location = this.getAttributeLocation(semantic);
-            console.log('ModelLoader: processPrimitive', location, semantic);
             this.gl.enableVertexAttribArray(location);
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
             const componentType = accessor.getComponentType();
             const elementSize = (_a = TYPE_TO_SIZE[accessor.getType()]) !== null && _a !== void 0 ? _a : 1;
             const normalized = accessor.getNormalized();
-            console.log('ModelLoader: processPrimitive', location, semantic, componentType, elementSize, normalized);
             if (semantic === 'JOINTS_0') {
                 hasSkin = true;
-                console.log('ModelLoader: processPrimitive', componentType, elementSize, location);
                 this.gl.vertexAttribIPointer(location, elementSize, componentType, 0, // stride of 0 lets WebGL handle stride automatically
                 0 // no offset needed
                 );
@@ -14134,7 +14123,6 @@ class ModelLoader {
         }
         // Disable skinning attributes if not used
         if (!hasSkin) {
-            console.log('ModelLoader: processPrimitive - disable skinning attributes');
             this.gl.disableVertexAttribArray(this.getAttributeLocation('JOINTS_0'));
             this.gl.vertexAttribI4uiv(this.getAttributeLocation('JOINTS_0'), [0, 0, 0, 0]);
             this.gl.disableVertexAttribArray(this.getAttributeLocation('WEIGHTS_0'));
@@ -14237,7 +14225,6 @@ class ModelLoader {
     }
     processJoints(document, modelData) {
         const skins = document.getRoot().listSkins();
-        console.info('ModelLoader: processJoints:', skins.length);
         if (skins.length === 0)
             return;
         const skin = skins[0];
@@ -14270,7 +14257,6 @@ class ModelLoader {
                 node: joint
             };
         });
-        console.log('ModelLoader: processJoints', modelData.jointData);
     }
     cleanupModelResources(modelData) {
         // Should null-check resources before deletion
@@ -14279,6 +14265,49 @@ class ModelLoader {
         // - delete vertex arrays
         // Clean up textures
         modelData.materialSystem.cleanup();
+    }
+    // KISS: Simple bounding sphere calculation from all vertices
+    calculateBoundingSphere(modelData) {
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        let vertexCount = 0;
+        // Find bounding box from all mesh vertices
+        for (const mesh of modelData.meshes) {
+            for (const primitive of mesh.primitives) {
+                const positions = primitive.attributes.get('POSITION');
+                if (!positions)
+                    continue;
+                for (let i = 0; i < positions.length; i += 3) {
+                    const x = positions[i];
+                    const y = positions[i + 1];
+                    const z = positions[i + 2];
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    minZ = Math.min(minZ, z);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                    maxZ = Math.max(maxZ, z);
+                    vertexCount++;
+                }
+            }
+        }
+        if (vertexCount === 0) {
+            // No vertices found, return default sphere
+            return { center: [0, 0, 0], radius: 1 };
+        }
+        // Center is middle of bounding box
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const centerZ = (minZ + maxZ) / 2;
+        // Radius is distance from center to farthest corner
+        const dx = maxX - centerX;
+        const dy = maxY - centerY;
+        const dz = maxZ - centerZ;
+        const radius = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return {
+            center: [centerX, centerY, centerZ],
+            radius: radius
+        };
     }
     createModelError(code, message) {
         return createModelError(code, message);
@@ -14511,7 +14540,7 @@ class GPUResourceCache {
             this.gl.useProgram(this.tempShadowState.currentProgram);
             this.gl.clearColor(this.tempShadowState.colorClearValue[0], this.tempShadowState.colorClearValue[1], this.tempShadowState.colorClearValue[2], this.tempShadowState.colorClearValue[3]);
             this.gl.clearDepth(this.tempShadowState.depthClearValue);
-            // Clear temp state after restore to prevent stale references
+            // Clear temp state to prevent stale references
             this.tempShadowState = null;
         }
     }
@@ -17733,6 +17762,136 @@ class ShaderUniformCache {
     }
 }
 
+class Frustum {
+    constructor() {
+        this.planes = [];
+        // Initialize 6 planes: left, right, bottom, top, near, far
+        for (let i = 0; i < 6; i++) {
+            this.planes.push({
+                normal: [0, 0, 0],
+                distance: 0
+            });
+        }
+    }
+    /**
+     * Extract frustum planes from view-projection matrix using Gribb & Hartmann method
+     * Uses a very close near plane for culling
+     */
+    extractFromMatrix(viewMatrix, projectionMatrix, nearPlaneDistance = 0.01) {
+        // Combine view and projection matrices
+        const viewProj = create$3();
+        multiply(viewProj, projectionMatrix, viewMatrix);
+        // Override near plane distance to be very close
+        const modifiedProj = clone$3(projectionMatrix);
+        // Modify the projection matrix for a very close near plane
+        // For perspective matrix: [2*n/(r-l), 0, (r+l)/(r-l), 0]
+        //                        [0, 2*n/(t-b), (t+b)/(t-b), 0]
+        //                        [0, 0, -(f+n)/(f-n), -2*f*n/(f-n)]
+        //                        [0, 0, -1, 0]
+        this.extractNearFromProjection(projectionMatrix);
+        const originalFar = this.extractFarFromProjection(projectionMatrix);
+        // Adjust near-related values in projection matrix
+        modifiedProj[10] = -(originalFar + nearPlaneDistance) / (originalFar - nearPlaneDistance);
+        modifiedProj[14] = -(2 * originalFar * nearPlaneDistance) / (originalFar - nearPlaneDistance);
+        // Recompute view-projection with modified near plane
+        multiply(viewProj, modifiedProj, viewMatrix);
+        // Extract planes using Gribb & Hartmann method
+        // Left plane: add 4th column to 1st column
+        this.planes[0].normal[0] = viewProj[3] + viewProj[0];
+        this.planes[0].normal[1] = viewProj[7] + viewProj[4];
+        this.planes[0].normal[2] = viewProj[11] + viewProj[8];
+        this.planes[0].distance = viewProj[15] + viewProj[12];
+        // Right plane: subtract 1st column from 4th column  
+        this.planes[1].normal[0] = viewProj[3] - viewProj[0];
+        this.planes[1].normal[1] = viewProj[7] - viewProj[4];
+        this.planes[1].normal[2] = viewProj[11] - viewProj[8];
+        this.planes[1].distance = viewProj[15] - viewProj[12];
+        // Bottom plane: add 4th column to 2nd column
+        this.planes[2].normal[0] = viewProj[3] + viewProj[1];
+        this.planes[2].normal[1] = viewProj[7] + viewProj[5];
+        this.planes[2].normal[2] = viewProj[11] + viewProj[9];
+        this.planes[2].distance = viewProj[15] + viewProj[13];
+        // Top plane: subtract 2nd column from 4th column
+        this.planes[3].normal[0] = viewProj[3] - viewProj[1];
+        this.planes[3].normal[1] = viewProj[7] - viewProj[5];
+        this.planes[3].normal[2] = viewProj[11] - viewProj[9];
+        this.planes[3].distance = viewProj[15] - viewProj[13];
+        // Near plane: add 4th column to 3rd column
+        this.planes[4].normal[0] = viewProj[3] + viewProj[2];
+        this.planes[4].normal[1] = viewProj[7] + viewProj[6];
+        this.planes[4].normal[2] = viewProj[11] + viewProj[10];
+        this.planes[4].distance = viewProj[15] + viewProj[14];
+        // Far plane: subtract 3rd column from 4th column
+        this.planes[5].normal[0] = viewProj[3] - viewProj[2];
+        this.planes[5].normal[1] = viewProj[7] - viewProj[6];
+        this.planes[5].normal[2] = viewProj[11] - viewProj[10];
+        this.planes[5].distance = viewProj[15] - viewProj[14];
+        // Normalize all planes
+        for (let i = 0; i < 6; i++) {
+            this.normalizePlane(i);
+        }
+    }
+    /**
+     * Extract near plane distance from projection matrix
+     */
+    extractNearFromProjection(proj) {
+        // For perspective matrix: near = -proj[14] / (proj[10] - 1)
+        return -proj[14] / (proj[10] - 1);
+    }
+    /**
+     * Extract far plane distance from projection matrix
+     */
+    extractFarFromProjection(proj) {
+        // For perspective matrix: far = -proj[14] / (proj[10] + 1)
+        return -proj[14] / (proj[10] + 1);
+    }
+    /**
+     * Normalize a frustum plane
+     */
+    normalizePlane(index) {
+        const plane = this.planes[index];
+        const length = Math.sqrt(plane.normal[0] * plane.normal[0] +
+            plane.normal[1] * plane.normal[1] +
+            plane.normal[2] * plane.normal[2]);
+        if (length > 0) {
+            plane.normal[0] /= length;
+            plane.normal[1] /= length;
+            plane.normal[2] /= length;
+            plane.distance /= length;
+        }
+    }
+    /**
+     * Test if a bounding sphere is inside the frustum
+     * Returns true if sphere is visible (inside or intersecting)
+     */
+    testSphere(sphere) {
+        for (let i = 0; i < 6; i++) {
+            const plane = this.planes[i];
+            // Calculate distance from sphere center to plane
+            const distance = plane.normal[0] * sphere.center[0] +
+                plane.normal[1] * sphere.center[1] +
+                plane.normal[2] * sphere.center[2] +
+                plane.distance;
+            // If sphere is completely behind any plane, it's outside the frustum
+            if (distance < -sphere.radius) {
+                return false;
+            }
+        }
+        // Sphere is inside or intersecting the frustum
+        return true;
+    }
+    /**
+     * Get distance from sphere center to a specific plane
+     */
+    getDistanceToPlane(sphere, planeIndex) {
+        const plane = this.planes[planeIndex];
+        return plane.normal[0] * sphere.center[0] +
+            plane.normal[1] * sphere.center[1] +
+            plane.normal[2] * sphere.center[2] +
+            plane.distance;
+    }
+}
+
 class InstanceManager {
     constructor(gl, modelLoader, gpuResources) {
         this.gpuResources = gpuResources;
@@ -17745,6 +17904,7 @@ class InstanceManager {
         this.dirtyInstances = new Set();
         this.lastRenderTick = -1;
         this.cachedModelsInWorker = new Set();
+        this.frustum = new Frustum();
         this.gl = gl;
         this.modelLoader = modelLoader;
         this._animationController = new AnimationController(modelLoader);
@@ -17900,6 +18060,8 @@ class InstanceManager {
         if (this.shadowMapManager) {
             this.gpuResources.setMultipleShadowMapUniforms(this.defaultShaderProgram, this.shadowMapManager);
         }
+        // Update frustum from view-projection matrices
+        this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
@@ -17973,6 +18135,25 @@ class InstanceManager {
         fromRotationTranslationScale(srtMatrix, instance.transform.rotation, instance.transform.position, instance.transform.scale);
         instance.worldMatrix.set(srtMatrix);
     }
+    // DRY: Extract bounding sphere culling logic
+    isInstanceVisible(instance, modelData) {
+        if (!modelData.boundingSphere) {
+            return true; // No bounding sphere = always visible
+        }
+        // KISS: Simple approximation - transform center and apply max scale
+        const center = modelData.boundingSphere.center;
+        const worldCenter = [
+            instance.transform.position[0] + center[0] * instance.transform.scale[0],
+            instance.transform.position[1] + center[1] * instance.transform.scale[1],
+            instance.transform.position[2] + center[2] * instance.transform.scale[2]
+        ];
+        const worldBoundingSphere = {
+            center: worldCenter,
+            radius: modelData.boundingSphere.radius * Math.max(...instance.transform.scale)
+        };
+        const isVisible = this.frustum.testSphere(worldBoundingSphere);
+        return isVisible;
+    }
     renderModelInstances(modelId, instanceGroup, viewProjection) {
         var _a;
         const modelData = this.modelLoader.getModelData(modelId);
@@ -17985,11 +18166,15 @@ class InstanceManager {
             const instance = this.instances.get(instanceId);
             if (!instance)
                 continue;
+            // KISS Frustum culling: Test instance bounding sphere
+            if (!this.isInstanceVisible(instance, modelData)) {
+                continue;
+            }
+            // Update world matrix for rendering
+            this.updateWorldMatrix(instance);
             const renderOptions = instance.renderOptions;
             // Set normal map state for this instance
             this.gpuResources.setNormalMapEnabled(this.defaultShaderProgram, (_a = renderOptions.useNormalMap) !== null && _a !== void 0 ? _a : false);
-            // Update world matrix
-            this.updateWorldMatrix(instance);
             // For each mesh in the model
             for (const renderableNode of modelData.renderableNodes) {
                 // Check if this node is disabled for this instance
@@ -18101,7 +18286,11 @@ class InstanceManager {
             const instance = this.instances.get(instanceId);
             if (!instance)
                 continue;
-            // Update world matrix
+            // KISS Frustum culling for shadow maps: Test instance bounding sphere
+            if (!this.isInstanceVisible(instance, modelData)) {
+                continue;
+            }
+            // Update world matrix for shadow rendering
             this.updateWorldMatrix(instance);
             // For each mesh in the model
             for (const renderableNode of modelData.renderableNodes) {

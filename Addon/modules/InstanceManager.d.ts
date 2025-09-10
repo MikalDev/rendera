@@ -21,6 +21,7 @@ export declare class InstanceManager implements IInstanceManager {
     private lastRenderTick;
     private cachedModelsInWorker;
     private _animationController;
+    private frustum;
     constructor(gl: WebGL2RenderingContext, modelLoader: ModelLoader, gpuResources: IGPUResourceManager);
     initialize(): void;
     createViewProjection(fov: number, resolution: {
@@ -46,6 +47,7 @@ export declare class InstanceManager implements IInstanceManager {
     private removeFromModelGroup;
     updateAnimation(instance: InstanceData, deltaTime: number): void;
     private updateWorldMatrix;
+    private isInstanceVisible;
     renderModelInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
         view: mat4;
         projection: mat4;

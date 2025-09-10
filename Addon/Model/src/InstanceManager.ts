@@ -6,6 +6,7 @@ import { AnimationController } from './AnimationController';
 import { mat3, mat4 } from 'gl-matrix';
 import { ShadowMapManager } from './ShadowMapManager';
 import { ShaderUniformCache } from './ShaderUniformCache';
+import { Frustum } from './Frustum';
 
 export class InstanceManager implements IInstanceManager {
     private gl: WebGL2RenderingContext;
@@ -33,6 +34,7 @@ export class InstanceManager implements IInstanceManager {
     private cachedModelsInWorker: Set<string> = new Set();
 
     private _animationController: AnimationController;
+    private frustum: Frustum = new Frustum();
 
     constructor(
         gl: WebGL2RenderingContext,
@@ -244,6 +246,9 @@ export class InstanceManager implements IInstanceManager {
             );
         }
 
+        // Update frustum from view-projection matrices
+        this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
+
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }
@@ -330,6 +335,31 @@ export class InstanceManager implements IInstanceManager {
        instance.worldMatrix.set(srtMatrix);
     }
 
+    // DRY: Extract bounding sphere culling logic
+    private isInstanceVisible(instance: InstanceData, modelData: any): boolean {
+        if (!modelData.boundingSphere) {
+            return true; // No bounding sphere = always visible
+        }
+        
+        // KISS: Simple approximation - transform center and apply max scale
+        const center = modelData.boundingSphere.center;
+        const worldCenter: [number, number, number] = [
+            instance.transform.position[0] + center[0] * instance.transform.scale[0],
+            instance.transform.position[1] + center[1] * instance.transform.scale[1],
+            instance.transform.position[2] + center[2] * instance.transform.scale[2]
+        ];
+        
+        const worldBoundingSphere = {
+            center: worldCenter,
+            radius: modelData.boundingSphere.radius * Math.max(...instance.transform.scale)
+        };
+
+        const isVisible = this.frustum.testSphere(worldBoundingSphere);
+        
+
+        return isVisible;
+    }
+
     public renderModelInstances(
         modelId: string, 
         instanceGroup: Set<number>, 
@@ -337,14 +367,24 @@ export class InstanceManager implements IInstanceManager {
     ): void {
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData) return;
+        
 
         // Basic shader setup TODO: move to GPUResourceManager
         this.gl.useProgram(this.defaultShaderProgram);
+
 
         // For each instance
         for (const instanceId of instanceGroup) {
             const instance = this.instances.get(instanceId);
             if (!instance) continue;
+
+            // KISS Frustum culling: Test instance bounding sphere
+            if (!this.isInstanceVisible(instance, modelData)) {
+                continue;
+            }
+
+            // Update world matrix for rendering
+            this.updateWorldMatrix(instance);
 
             const renderOptions = instance.renderOptions;
 
@@ -353,9 +393,6 @@ export class InstanceManager implements IInstanceManager {
                 this.defaultShaderProgram, 
                 renderOptions.useNormalMap ?? false
             );
-
-            // Update world matrix
-            this.updateWorldMatrix(instance);
 
             // For each mesh in the model
             for (const renderableNode of modelData.renderableNodes) {
@@ -497,7 +534,12 @@ export class InstanceManager implements IInstanceManager {
             const instance = this.instances.get(instanceId);
             if (!instance) continue;
 
-            // Update world matrix
+            // KISS Frustum culling for shadow maps: Test instance bounding sphere
+            if (!this.isInstanceVisible(instance, modelData)) {
+                continue;
+            }
+
+            // Update world matrix for shadow rendering
             this.updateWorldMatrix(instance);
 
             // For each mesh in the model

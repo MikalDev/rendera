@@ -8,7 +8,9 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "WebFetch(domain:www.construct.net)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git restore:*)",
+      "Bash(git log:*)"
     ],
     "deny": []
   }

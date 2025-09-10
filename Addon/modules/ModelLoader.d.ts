@@ -28,6 +28,7 @@ export declare class ModelLoader implements IModelLoader {
     private processAnimations;
     private processJoints;
     private cleanupModelResources;
+    private calculateBoundingSphere;
     private createModelError;
     generateModelId(url: string): ModelId;
     private createAttributeBuffer;

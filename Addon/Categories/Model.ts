@@ -13,7 +13,6 @@ export default class ModelCategory {
     loadModel(this: Instance, path: string) {
         const modelId = this.modelLoader.generateModelId(path);
         if (this.modelLoader.hasModel(modelId)) {
-            console.info('[rendera] Model already loaded', modelId, path);
             // Trigger immediately if already loaded
             this._triggerModelLoaded(path);
             return;
@@ -21,7 +20,6 @@ export default class ModelCategory {
         
         // Load model asynchronously
         this.modelLoader.loadModel(path).then(() => {
-            console.info('[rendera] Model loaded', modelId, path);
             // Trigger the onModelLoaded condition
             this._triggerModelLoaded(path);
         }).catch((error) => {

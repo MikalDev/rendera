@@ -1,6 +1,6 @@
 import { Animation,Accessor, Document, Node, Primitive, WebIO, Texture, Mesh, TextureInfo } from '@gltf-transform/core';
 import { ModelError, ModelErrorCode, createModelError } from './errors';
-import { AttributeSemantic, ModelId, ModelData, IGPUResourceManager, MeshPrimitive, MaterialData, IModelLoader, SAMPLER_TEXTURE_UNIT_MAP, ModelMesh, ExtendedNode } from './types';
+import { AttributeSemantic, ModelId, ModelData, IGPUResourceManager, MeshPrimitive, MaterialData, IModelLoader, SAMPLER_TEXTURE_UNIT_MAP, ModelMesh, ExtendedNode, BoundingSphere } from './types';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { DracoDecoderModule } from './draco_decoder_gltf';
 import { mat4} from 'gl-matrix';
@@ -22,7 +22,6 @@ export class ModelLoader implements IModelLoader {
 
     private async createWebIO(): Promise<void> {
         const dracoDecoder = await (DracoDecoderModule as () => Promise<unknown>)();
-        console.log('ModelLoader: dracoDecoder loaded')
         this.webio = new WebIO()
             .registerExtensions([...ALL_EXTENSIONS])
             .registerDependencies({
@@ -83,9 +82,11 @@ export class ModelLoader implements IModelLoader {
             return false;
         }
         
+        // Calculate KISS bounding sphere from all vertex positions
+        modelData.boundingSphere = this.calculateBoundingSphere(modelData);
+        
         // Store model data
         this.loadedModels.set(modelId.id, modelData);
-        console.info('[rendera] ModelLoader: processModel - modelData loaded', modelId.id);
         return true;
     }
 
@@ -96,7 +97,6 @@ export class ModelLoader implements IModelLoader {
     async processPendingDocuments(): Promise<number> {
         const pendingDocuments = this.pendingDocuments;
         if (pendingDocuments.size === 0) return 0;
-        console.log('[rendera] ModelLoader: processPendingDocuments', this.pendingDocuments.size);
         let count = 0;
 		for (const [id, _document] of pendingDocuments.entries()) {
 			const modelId: ModelId = { id };
@@ -152,7 +152,6 @@ export class ModelLoader implements IModelLoader {
             mat4.multiply(rootMatrix, conversionMatrix, rootMatrix);
             rootNode.setMatrix(rootMatrix);
             
-            console.log('[ModelLoader] Applied coordinate system conversion to root node');
         }
 
         /*
@@ -164,18 +163,12 @@ export class ModelLoader implements IModelLoader {
         ]);
         */
 
-        console.log('ModelLoader: processDocument',);
         this.gpuResources.gpuResourceCache.cacheModelMode();
         // Process each component sequentially for easier debugging
-        console.log('ModelLoader: processAnimations', modelData);
         await this.processJoints(document, modelData);
-        console.log('ModelLoader: processJoints', modelData);
         await this.processRenderableNodes(document, modelData);
-        console.log('ModelLoader: processRenderableNodes', modelData);
         this.gpuResources.gpuResourceCache.restoreModelMode();
         await this.processMaterials(document, modelData);
-        console.log('ModelLoader: processMaterials', modelData);
-        console.log('ModelLoader: processDocument', modelData);
         await this.processAnimations(document, modelData);
 
         return modelData;
@@ -277,7 +270,6 @@ export class ModelLoader implements IModelLoader {
             attributes[semantic as AttributeSemantic] = buffer;
 
             const location = this.getAttributeLocation(semantic);
-            console.log('ModelLoader: processPrimitive', location, semantic);
             this.gl.enableVertexAttribArray(location);
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
             
@@ -285,11 +277,9 @@ export class ModelLoader implements IModelLoader {
             const elementSize = TYPE_TO_SIZE[accessor.getType()] ?? 1;
             const normalized = accessor.getNormalized();
 
-            console.log('ModelLoader: processPrimitive', location, semantic, componentType, elementSize, normalized);
 
             if (semantic === 'JOINTS_0') {
                 hasSkin = true;
-                console.log('ModelLoader: processPrimitive', componentType, elementSize, location);
                 this.gl.vertexAttribIPointer(
                     location,
                     elementSize,
@@ -311,7 +301,6 @@ export class ModelLoader implements IModelLoader {
 
         // Disable skinning attributes if not used
         if (!hasSkin) {
-            console.log('ModelLoader: processPrimitive - disable skinning attributes');
             this.gl.disableVertexAttribArray(this.getAttributeLocation('JOINTS_0'));
             this.gl.vertexAttribI4uiv(this.getAttributeLocation('JOINTS_0'), [0, 0, 0, 0]);
             this.gl.disableVertexAttribArray(this.getAttributeLocation('WEIGHTS_0'));
@@ -428,7 +417,6 @@ export class ModelLoader implements IModelLoader {
 
     private processJoints(document: Document, modelData: ModelData) {
         const skins = document.getRoot().listSkins();
-        console.info('ModelLoader: processJoints:', skins.length);
         if (skins.length === 0) return;
 
         const skin = skins[0];
@@ -481,7 +469,6 @@ export class ModelLoader implements IModelLoader {
                 node: joint
             };
         });
-        console.log('ModelLoader: processJoints', modelData.jointData);
     }
 
     private cleanupModelResources(modelData: ModelData): void {
@@ -492,6 +479,57 @@ export class ModelLoader implements IModelLoader {
 
         // Clean up textures
         modelData.materialSystem.cleanup();
+    }
+
+    // KISS: Simple bounding sphere calculation from all vertices
+    private calculateBoundingSphere(modelData: ModelData): BoundingSphere {
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        let vertexCount = 0;
+
+        // Find bounding box from all mesh vertices
+        for (const mesh of modelData.meshes) {
+            for (const primitive of mesh.primitives) {
+                const positions = primitive.attributes.get('POSITION');
+                if (!positions) continue;
+
+                for (let i = 0; i < positions.length; i += 3) {
+                    const x = positions[i];
+                    const y = positions[i + 1];
+                    const z = positions[i + 2];
+                    
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    minZ = Math.min(minZ, z);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                    maxZ = Math.max(maxZ, z);
+                    vertexCount++;
+                }
+            }
+        }
+
+        if (vertexCount === 0) {
+            // No vertices found, return default sphere
+            return { center: [0, 0, 0], radius: 1 };
+        }
+
+        // Center is middle of bounding box
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const centerZ = (minZ + maxZ) / 2;
+
+        // Radius is distance from center to farthest corner
+        const dx = maxX - centerX;
+        const dy = maxY - centerY;
+        const dz = maxZ - centerZ;
+        const radius = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+
+        return {
+            center: [centerX, centerY, centerZ],
+            radius: radius
+        };
     }
 
     private createModelError(
