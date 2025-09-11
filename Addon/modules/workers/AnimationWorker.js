@@ -1097,8 +1097,19 @@
               const boneMatrix = create$3();
               multiply(boneMatrix, nodeInverseMatrix, jointMatrix);
               multiply(boneMatrix, boneMatrix, inverseBindMatrix);
+              // Apply coordinate conversion to match non-skinned node transforms
+              // Note: applyCoordinateConversion function is not available in worker context
+              // Use direct matrix multiplication with coordinate conversion matrix
+              const conversionMatrix = new Float32Array([
+                  1, 0, 0, 0, // X unchanged
+                  0, -1, 0, 0, // Flip Y
+                  0, 0, -1, 0, // Flip Z  
+                  0, 0, 0, 1
+              ]);
+              const convertedBoneMatrix = create$3();
+              multiply(convertedBoneMatrix, conversionMatrix, boneMatrix);
               // Store result
-              boneMatrices.set(boneMatrix, j * 16);
+              boneMatrices.set(convertedBoneMatrix, j * 16);
           }
           allBoneMatrices.set(nodeIndex, boneMatrices);
       }

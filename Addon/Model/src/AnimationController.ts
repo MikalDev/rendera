@@ -1,6 +1,6 @@
 // src/AnimationController.ts
 import { ModelLoader } from './ModelLoader';
-import { InstanceData, AnimationOptions, AnimationState, ExtendedNode, AnimationEventCallback, AnimationEventType, AnimationEventData, NodeTransforms } from './types';
+import { InstanceData, AnimationOptions, AnimationState, ExtendedNode, AnimationEventCallback, AnimationEventType, AnimationEventData, NodeTransforms, applyCoordinateConversion } from './types';
 import { mat4, quat, vec3, vec4 } from 'gl-matrix';
 import { Scene, Animation, Node, TypedArray } from '@gltf-transform/core';
 import { AnimationWorkerManager } from './AnimationWorkerManager';
@@ -600,7 +600,10 @@ export class AnimationController {
             const inverseBindMatrix = this.mat4FromTypedArray(inverseBindMatrices, jj);
             mat4.multiply(boneMatrix, nodeInverseMatrix, jointMatrix);
             mat4.multiply(boneMatrix, boneMatrix, inverseBindMatrix);
-            nodeBoneMatrices.set(boneMatrix, jj * 16);
+            
+            // Apply coordinate conversion to match non-skinned node transforms
+            const convertedBoneMatrix = applyCoordinateConversion(boneMatrix);
+            nodeBoneMatrices.set(convertedBoneMatrix, jj * 16);
         }
         instance.animationState.boneMatrices.set(extendedNode.indexData.nodeIndex, nodeBoneMatrices);
     }

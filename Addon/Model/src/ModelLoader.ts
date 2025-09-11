@@ -1,6 +1,6 @@
 import { Animation,Accessor, Document, Node, Primitive, WebIO, Texture, Mesh, TextureInfo } from '@gltf-transform/core';
 import { ModelError, ModelErrorCode, createModelError } from './errors';
-import { AttributeSemantic, ModelId, ModelData, IGPUResourceManager, MeshPrimitive, MaterialData, IModelLoader, SAMPLER_TEXTURE_UNIT_MAP, ModelMesh, ExtendedNode, BoundingSphere } from './types';
+import { AttributeSemantic, ModelId, ModelData, IGPUResourceManager, MeshPrimitive, MaterialData, IModelLoader, SAMPLER_TEXTURE_UNIT_MAP, ModelMesh, ExtendedNode, BoundingSphere, applyCoordinateConversion, COORDINATE_CONVERSION_MATRIX } from './types';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { DracoDecoderModule } from './draco_decoder_gltf';
 import { mat4} from 'gl-matrix';
@@ -133,25 +133,11 @@ export class ModelLoader implements IModelLoader {
             nodeNameMap: new Map<string, ExtendedNode>()
         };
 
-        // Apply coordinate system conversion for C3 compatibility
-        // GLB/glTF uses right-handed Y-up, C3 uses left-handed Y-down
-        // Apply conversion matrix to root node: flip Y and Z axes
-        const rootNode = modelData.rootNode;
-        if (rootNode) {
+        // Apply coordinate system conversion to ALL scene children
+        for (const rootNode of document.getRoot().listScenes()[0].listChildren()) {
             const rootMatrix = rootNode.getMatrix() || mat4.create();
-            
-            // Create conversion matrix: scale(1, -1, -1) to flip Y and Z
-            const conversionMatrix = mat4.fromValues(
-                1,  0,  0,  0,  // X unchanged
-                0, -1,  0,  0,  // Flip Y (Y-up to Y-down)
-                0,  0, -1,  0,  // Flip Z (right-handed to left-handed)
-                0,  0,  0,  1
-            );
-            
-            // Pre-multiply: newMatrix = conversion * original
-            mat4.multiply(rootMatrix, conversionMatrix, rootMatrix);
-            rootNode.setMatrix(rootMatrix);
-            
+            const convertedMatrix = applyCoordinateConversion(rootMatrix);
+            rootNode.setMatrix(Array.from(convertedMatrix) as [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number]);
         }
 
         /*
@@ -449,12 +435,16 @@ export class ModelLoader implements IModelLoader {
         modelData.jointData = joints.map((joint, index) => {
             // Get the inverse bind matrix for this joint (16 floats per matrix)
             const matrixOffset = index * 16;
-            const inverseBindMatrix = mat4.fromValues(
+            const originalInverseBindMatrix = mat4.fromValues(
                 matrices[matrixOffset], matrices[matrixOffset + 1], matrices[matrixOffset + 2], matrices[matrixOffset + 3],
                 matrices[matrixOffset + 4], matrices[matrixOffset + 5], matrices[matrixOffset + 6], matrices[matrixOffset + 7],
                 matrices[matrixOffset + 8], matrices[matrixOffset + 9], matrices[matrixOffset + 10], matrices[matrixOffset + 11],
                 matrices[matrixOffset + 12], matrices[matrixOffset + 13], matrices[matrixOffset + 14], matrices[matrixOffset + 15]
             );
+
+            // Apply coordinate conversion to inverse bind matrix
+            const inverseBindMatrix = mat4.create();
+            mat4.multiply(inverseBindMatrix, originalInverseBindMatrix, COORDINATE_CONVERSION_MATRIX);
 
             // Get child indices, validating each one
             const children = joint.listChildren()

@@ -9,6 +9,21 @@ import { MaterialSystem } from './MaterialSystem';
 
 export const MAX_BONES = 256;
 
+// Coordinate system conversion: glTF (right-handed Y-up) to C3 (left-handed Y-down)
+export const COORDINATE_CONVERSION_MATRIX = mat4.fromValues(
+    1,  0,  0,  0,  // X unchanged
+    0, -1,  0,  0,  // Flip Y (Y-up to Y-down)
+    0,  0, -1,  0,  // Flip Z (right-handed to left-handed)
+    0,  0,  0,  1
+);
+
+// Apply coordinate conversion to a matrix
+export function applyCoordinateConversion(sourceMatrix: mat4): mat4 {
+    const result = mat4.create();
+    mat4.multiply(result, COORDINATE_CONVERSION_MATRIX, sourceMatrix);
+    return result;
+}
+
 export interface IAnimationTarget {
     updateTransform(
         path: 'translation' | 'rotation' | 'scale',
