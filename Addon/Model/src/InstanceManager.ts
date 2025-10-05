@@ -468,19 +468,21 @@ export class InstanceManager implements IInstanceManager {
                     
                     if (nodeMatrix) {
                         const nodeWorldMatrix = mat4.create();
-                        mat4.multiply(nodeWorldMatrix, nodeMatrix, instance.worldMatrix);
+                        mat4.multiply(nodeWorldMatrix, instance.worldMatrix, nodeMatrix);
                         finalMatrix = nodeWorldMatrix;
                     } else {
                         finalMatrix = instance.worldMatrix;
                     }
-                    
-                    // Check determinant for coordinate system flip (negative scale)
-                    const det = mat4.determinant(finalMatrix);
+
+                    // Calculate normal matrix (inverse transpose)
                     mat3.normalFromMat4(normalMatrix, finalMatrix);
-                    
-                    // If determinant is negative, flip normals to handle coordinate conversion
-                    if (det < 0) {
-                        mat3.scale(normalMatrix, normalMatrix, [-1, -1, -1]);
+
+                    // Apply coordinate conversion for static meshes (when nodeMatrix is null)
+                    // Shader converts normals from GLB (Y-up, RH) to C3 (Y-down, LH)
+                    // NormalMatrix must account for this conversion
+                    if (!nodeMatrix) {
+                        const coordConversion = mat3.fromValues(1, 0, 0, 0, -1, 0, 0, 0, -1);
+                        mat3.multiply(normalMatrix, coordConversion, normalMatrix);
                     }
 
                     const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');

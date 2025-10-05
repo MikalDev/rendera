@@ -1404,7 +1404,7 @@ Logger.DEFAULT_INSTANCE = new _Logger(_Logger.Verbosity.INFO);
  * @returns {Number} determinant of a
  */
 
-function determinant$1(a) {
+function determinant(a) {
   var a00 = a[0],
       a01 = a[1],
       a02 = a[2],
@@ -1445,7 +1445,7 @@ function determinant$1(a) {
  * @returns {mat4} out
  */
 
-function multiply$1(out, a, b) {
+function multiply$2(out, a, b) {
   var a00 = a[0],
       a01 = a[1],
       a02 = a[2],
@@ -1659,7 +1659,7 @@ class MathUtils {
     const sy = length$1([srcMat[4], srcMat[5], srcMat[6]]);
     const sz = length$1([srcMat[8], srcMat[9], srcMat[10]]);
     // if determine is negative, we need to invert one scale
-    const det = determinant$1(srcMat);
+    const det = determinant(srcMat);
     if (det < 0) sx = -sx;
     dstTranslation[0] = srcMat[12];
     dstTranslation[1] = srcMat[13];
@@ -3864,7 +3864,7 @@ class Node extends ExtensibleProperty {
     let ancestor;
     const worldMatrix = ancestors.pop().getMatrix();
     while (ancestor = ancestors.pop()) {
-      multiply$1(worldMatrix, worldMatrix, ancestor.getMatrix());
+      multiply$2(worldMatrix, worldMatrix, ancestor.getMatrix());
     }
     return worldMatrix;
   }
@@ -6823,26 +6823,70 @@ function create$4() {
   return out;
 }
 /**
- * Scales the mat3 by the dimensions in the given vec2
+ * Create a new mat3 with the given values
+ *
+ * @param {Number} m00 Component in column 0, row 0 position (index 0)
+ * @param {Number} m01 Component in column 0, row 1 position (index 1)
+ * @param {Number} m02 Component in column 0, row 2 position (index 2)
+ * @param {Number} m10 Component in column 1, row 0 position (index 3)
+ * @param {Number} m11 Component in column 1, row 1 position (index 4)
+ * @param {Number} m12 Component in column 1, row 2 position (index 5)
+ * @param {Number} m20 Component in column 2, row 0 position (index 6)
+ * @param {Number} m21 Component in column 2, row 1 position (index 7)
+ * @param {Number} m22 Component in column 2, row 2 position (index 8)
+ * @returns {mat3} A new mat3
+ */
+
+function fromValues$2(m00, m01, m02, m10, m11, m12, m20, m21, m22) {
+  var out = new ARRAY_TYPE(9);
+  out[0] = m00;
+  out[1] = m01;
+  out[2] = m02;
+  out[3] = m10;
+  out[4] = m11;
+  out[5] = m12;
+  out[6] = m20;
+  out[7] = m21;
+  out[8] = m22;
+  return out;
+}
+/**
+ * Multiplies two mat3's
  *
  * @param {mat3} out the receiving matrix
- * @param {ReadonlyMat3} a the matrix to rotate
- * @param {ReadonlyVec2} v the vec2 to scale the matrix by
+ * @param {ReadonlyMat3} a the first operand
+ * @param {ReadonlyMat3} b the second operand
  * @returns {mat3} out
- **/
+ */
 
-function scale$1(out, a, v) {
-  var x = v[0],
-      y = v[1];
-  out[0] = x * a[0];
-  out[1] = x * a[1];
-  out[2] = x * a[2];
-  out[3] = y * a[3];
-  out[4] = y * a[4];
-  out[5] = y * a[5];
-  out[6] = a[6];
-  out[7] = a[7];
-  out[8] = a[8];
+function multiply$1(out, a, b) {
+  var a00 = a[0],
+      a01 = a[1],
+      a02 = a[2];
+  var a10 = a[3],
+      a11 = a[4],
+      a12 = a[5];
+  var a20 = a[6],
+      a21 = a[7],
+      a22 = a[8];
+  var b00 = b[0],
+      b01 = b[1],
+      b02 = b[2];
+  var b10 = b[3],
+      b11 = b[4],
+      b12 = b[5];
+  var b20 = b[6],
+      b21 = b[7],
+      b22 = b[8];
+  out[0] = b00 * a00 + b01 * a10 + b02 * a20;
+  out[1] = b00 * a01 + b01 * a11 + b02 * a21;
+  out[2] = b00 * a02 + b01 * a12 + b02 * a22;
+  out[3] = b10 * a00 + b11 * a10 + b12 * a20;
+  out[4] = b10 * a01 + b11 * a11 + b12 * a21;
+  out[5] = b10 * a02 + b11 * a12 + b12 * a22;
+  out[6] = b20 * a00 + b21 * a10 + b22 * a20;
+  out[7] = b20 * a01 + b21 * a11 + b22 * a21;
+  out[8] = b20 * a02 + b21 * a12 + b22 * a22;
   return out;
 }
 /**
@@ -7122,45 +7166,6 @@ function invert(out, a) {
   out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
   out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
   return out;
-}
-/**
- * Calculates the determinant of a mat4
- *
- * @param {ReadonlyMat4} a the source matrix
- * @returns {Number} determinant of a
- */
-
-function determinant(a) {
-  var a00 = a[0],
-      a01 = a[1],
-      a02 = a[2],
-      a03 = a[3];
-  var a10 = a[4],
-      a11 = a[5],
-      a12 = a[6],
-      a13 = a[7];
-  var a20 = a[8],
-      a21 = a[9],
-      a22 = a[10],
-      a23 = a[11];
-  var a30 = a[12],
-      a31 = a[13],
-      a32 = a[14],
-      a33 = a[15];
-  var b00 = a00 * a11 - a01 * a10;
-  var b01 = a00 * a12 - a02 * a10;
-  var b02 = a00 * a13 - a03 * a10;
-  var b03 = a01 * a12 - a02 * a11;
-  var b04 = a01 * a13 - a03 * a11;
-  var b05 = a02 * a13 - a03 * a12;
-  var b06 = a20 * a31 - a21 * a30;
-  var b07 = a20 * a32 - a22 * a30;
-  var b08 = a20 * a33 - a23 * a30;
-  var b09 = a21 * a32 - a22 * a31;
-  var b10 = a21 * a33 - a23 * a31;
-  var b11 = a22 * a33 - a23 * a32; // Calculate the determinant
-
-  return b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
 }
 /**
  * Multiplies two mat4s
@@ -13797,9 +13802,38 @@ else if (typeof exports === 'object')
 class MaterialSystem {
     constructor(gl, samplerTextureUnitMap) {
         this.currentMaterial = null;
+        // Default textures for missing material properties
+        this.defaultTextures = new Map();
         this.gl = gl;
         this.materials = new Map();
         this.samplerTextureUnitMap = samplerTextureUnitMap;
+        this.createDefaultTextures();
+    }
+    createDefaultTextures() {
+        // Create 1x1 default textures for missing material properties
+        const createTexture = (r, g, b, a) => {
+            const texture = this.gl.createTexture();
+            if (!texture)
+                throw new Error('Failed to create default texture');
+            this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+            this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, 1, 1, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, new Uint8Array([r, g, b, a]));
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+            return texture;
+        };
+        // White texture for base color (255, 255, 255, 255)
+        this.defaultTextures.set('u_BaseColorSampler', createTexture(255, 255, 255, 255));
+        // Flat normal map (128, 128, 255) = (0.5, 0.5, 1.0) in normalized space
+        this.defaultTextures.set('u_NormalSampler', createTexture(128, 128, 255, 255));
+        // Metallic-Roughness: R=unused, G=roughness(max), B=metallic(0), A=255
+        // G=255 (max roughness), B=0 (no metallic)
+        this.defaultTextures.set('u_MetallicRoughnessSampler', createTexture(0, 255, 0, 255));
+        // White for occlusion (no occlusion = 1.0)
+        this.defaultTextures.set('u_OcclusionSampler', createTexture(255, 255, 255, 255));
+        // Black for emissive (no emission)
+        this.defaultTextures.set('u_EmissiveSampler', createTexture(0, 0, 0, 255));
     }
     cleanup() {
         this.materials.forEach((material) => {
@@ -13809,6 +13843,11 @@ class MaterialSystem {
             });
         });
         this.materials.clear();
+        // Clean up default textures
+        this.defaultTextures.forEach((texture) => {
+            this.gl.deleteTexture(texture);
+        });
+        this.defaultTextures.clear();
     }
     addMaterial(material) {
         this.materials.set(this.materials.size, material);
@@ -13823,40 +13862,25 @@ class MaterialSystem {
         this.currentMaterial = materialIndex;
     }
     applyMaterial(material, shader) {
-        // First, unbind all possible texture units that might be used
-        // Clear all texture types to prevent conflicts with C3's existing bindings
-        for (const unit of Object.values(this.samplerTextureUnitMap)) {
-            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
-            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
-            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
-            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
-        }
-        // Then bind textures to their fixed texture units based on sampler names
-        material.textures.forEach((texture, samplerName) => {
-            const textureUnit = this.samplerTextureUnitMap[samplerName];
-            if (textureUnit === undefined) {
-                console.warn(`No texture unit defined for sampler '${samplerName}'.`);
-                return;
-            }
+        // Bind all samplers - either from material or use defaults
+        // This prevents texture state from leaking between materials
+        for (const [samplerName, textureUnit] of Object.entries(this.samplerTextureUnitMap)) {
             const location = this.gl.getUniformLocation(shader, samplerName);
-            const useTextureLoc = this.gl.getUniformLocation(shader, `u_Use${samplerName.slice(2)}`);
-            if (texture && location !== null) {
-                // Texture exists, bind it and enable its use
-                this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
-                this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+            if (location === null)
+                continue;
+            this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
+            // Get texture from material, or use default if missing
+            const materialTexture = material.textures.get(samplerName);
+            const textureToUse = materialTexture || this.defaultTextures.get(samplerName);
+            if (textureToUse) {
+                this.gl.bindTexture(this.gl.TEXTURE_2D, textureToUse);
                 this.gl.uniform1i(location, textureUnit);
-                if (useTextureLoc !== null) {
-                    this.gl.uniform1i(useTextureLoc, 1);
-                }
             }
             else {
-                // No texture, disable its use
-                if (useTextureLoc !== null) {
-                    this.gl.uniform1i(useTextureLoc, 0);
-                }
+                // No texture and no default - unbind to be safe
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
             }
-        });
+        }
         // Set material uniforms
         if (material.uniforms) {
             for (const [name, value] of Object.entries(material.uniforms)) {
@@ -14777,12 +14801,17 @@ class GPUResourceManager {
 
             highp float handedness = tangent.w;
 
+            // Apply coordinate conversion to normals (GLB Y-up right-handed to C3 Y-down left-handed)
+            // This converts: Y-up to Y-down (flip Y), right-handed to left-handed (flip Z)
+            vec3 convertedNormal = normal * vec3(1.0, -1.0, -1.0);
+            vec3 convertedTangent = tangent.xyz * vec3(1.0, -1.0, -1.0);
+
             if (u_UseSkinning) {
                 for (int i = 0; i < 4; i++) {
                     uint joint = joints[i];
                     skinVertex += weights[i] * (u_BoneMatrices[joint] * vec4(position, 1.0));
-                    skinnedNormal += weights[i] * (mat3(u_BoneMatrices[joint]) * normal); // Apply skinning to normals
-                    skinnedTangent += weights[i] * (mat3(u_BoneMatrices[joint]) * tangent.xyz);
+                    skinnedNormal += weights[i] * (mat3(u_BoneMatrices[joint]) * convertedNormal);
+                    skinnedTangent += weights[i] * (mat3(u_BoneMatrices[joint]) * convertedTangent);
                 }
                 gl_Position = u_Projection * u_View * u_Model * skinVertex;
                 v_Position = (u_Model * skinVertex).xyz;
@@ -14791,8 +14820,8 @@ class GPUResourceManager {
             } else {
                 gl_Position = u_Projection * u_View * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
                 v_Position = (u_Model * u_NodeMatrix * vec4(nPosition, 1.0)).xyz;
-                N = normalize(u_NormalMatrix * normal);
-                T = normalize(u_NormalMatrix * tangent.xyz);
+                N = normalize(u_NormalMatrix * convertedNormal);
+                T = normalize(u_NormalMatrix * convertedTangent);
             }
 
             vec3 B = normalize(cross(N, T)) * handedness;
@@ -14968,38 +14997,48 @@ class GPUResourceManager {
                 vec3 lightDir = light.position - v_Position;
                 float distance = length(lightDir);
                 L = normalize(lightDir);
-                
+
                 // Spot light cone calculation
                 float cosTheta = dot(L, normalize(-light.direction));
                 float cosCutoff = light.cosAngle;
                 float cosOuterCutoff = light.cosAngle * (1.0 - light.spotPenumbra);
                 float epsilon = cosCutoff - cosOuterCutoff;
                 float spotIntensity = clamp((cosTheta - cosOuterCutoff) / epsilon, 0.0, 1.0);
-                
+
                 attenuation = spotIntensity / (1.0 + light.attenuation * distance * distance);
             }
             
             vec3 H = normalize(V + L);
-            
-            // Apply Lambert wrap for softer shadows
-            float NdotL = (dot(N, L) + u_LambertWrap) / (1.0 + u_LambertWrap);
-            NdotL = max(NdotL, 0.0);
-            
-            if (NdotL <= 0.0) return vec3(0.0);
-            
+
+            // Calculate NdotL
+            float NdotL = max(dot(N, L), 0.0);
+
+            // Apply Lambert wrap to soften lighting transitions (subsurface scattering effect)
+            // This only affects diffuse, keeping specular highlights sharp
+            float diffuseNdotL = (NdotL + u_LambertWrap) / (1.0 + u_LambertWrap);
+            diffuseNdotL = max(diffuseNdotL, 0.0);
+
+            // Early exit if no lighting contribution
+            if (diffuseNdotL <= 0.0) return vec3(0.0);
+
             // Calculate F0 (surface reflection at zero incidence)
             vec3 F0 = mix(vec3(0.04), baseColor, metallic);
-            
-            // Calculate specular and diffuse components
+
+            // Calculate PBR components using unwrapped NdotL for accurate specular
             vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+            float NdotV = max(dot(N, V), 0.0);
             float D = distributionGGX(N, H, roughness);
-            float G = geometrySmith(max(dot(N, V), 0.0), NdotL, roughness);
-            
-            vec3 specular = (F * D * G) / max(4.0 * max(dot(N, V), 0.0) * NdotL, 0.001);
+            float G = geometrySmith(NdotV, max(NdotL, 0.001), roughness);
+
+            // Cook-Torrance specular BRDF (uses unwrapped NdotL for sharp highlights)
+            vec3 specular = (D * F * G) / max(4.0 * NdotV * max(NdotL, 0.001), 0.001);
+
+            // Energy-conserving diffuse
             vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
             vec3 diffuse = kD * baseColor / PI;
-            
-            return (diffuse + specular) * light.color * light.intensity * NdotL * attenuation;
+
+            // Combine: diffuse uses wrapped NdotL (soft), specular uses unwrapped NdotL (sharp)
+            return (diffuse * diffuseNdotL + specular * max(NdotL, 0.0)) * light.color * light.intensity * attenuation;
         }
 
         float calculateShadowForMap(vec4 fragPosLightSpace, int shadowMapIndex, Light light) {
@@ -15091,11 +15130,8 @@ class GPUResourceManager {
                 int shadowMapIndex = u_LightToShadowMap[i];
                 if (shadowMapIndex >= 0 && shadowMapIndex < MAX_SHADOW_MAPS) {
                     shadow = calculateShadowForMap(v_PositionsFromLight[shadowMapIndex], shadowMapIndex, u_Lights[i]);
-                    // Soften shadow edges with Lambert wrap
-                    // When wrap is 1.0, shadows become much softer
-                    shadow = mix(shadow, 1.0, u_LambertWrap * 0.5);
                 }
-                
+
                 color += lightContrib * shadow;
             }
             
@@ -15111,9 +15147,7 @@ class GPUResourceManager {
             }
             
             // Add ambient (including GI), AO, and emissive (unaffected by shadows)
-            // Lambert wrap also increases base ambient to fill in shadows
-            float baseAmbient = 0.03 + (u_LambertWrap * 0.1);
-            vec3 ambient = (vec3(baseAmbient) + hemisphericAmbient) * baseColor * aoSample;
+            vec3 ambient = hemisphericAmbient * baseColor * aoSample;
             vec3 emissive = SRGBtoLinear(emissiveSample.rgb);
             color += ambient + emissive;
             
@@ -18247,18 +18281,20 @@ class InstanceManager {
                     let finalMatrix;
                     if (nodeMatrix) {
                         const nodeWorldMatrix = create$3();
-                        multiply(nodeWorldMatrix, nodeMatrix, instance.worldMatrix);
+                        multiply(nodeWorldMatrix, instance.worldMatrix, nodeMatrix);
                         finalMatrix = nodeWorldMatrix;
                     }
                     else {
                         finalMatrix = instance.worldMatrix;
                     }
-                    // Check determinant for coordinate system flip (negative scale)
-                    const det = determinant(finalMatrix);
+                    // Calculate normal matrix (inverse transpose)
                     normalFromMat4(normalMatrix, finalMatrix);
-                    // If determinant is negative, flip normals to handle coordinate conversion
-                    if (det < 0) {
-                        scale$1(normalMatrix, normalMatrix, [-1, -1, -1]);
+                    // Apply coordinate conversion for static meshes (when nodeMatrix is null)
+                    // Shader converts normals from GLB (Y-up, RH) to C3 (Y-down, LH)
+                    // NormalMatrix must account for this conversion
+                    if (!nodeMatrix) {
+                        const coordConversion = fromValues$2(1, 0, 0, 0, -1, 0, 0, 0, -1);
+                        multiply$1(normalMatrix, coordConversion, normalMatrix);
                     }
                     const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
                     this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);

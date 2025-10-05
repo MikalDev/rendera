@@ -7,6 +7,9 @@ export class MaterialSystem {
     private currentMaterial: number | null = null;
     private samplerTextureUnitMap: Record<string, number>;
 
+    // Default textures for missing material properties
+    private defaultTextures: Map<string, WebGLTexture> = new Map();
+
     constructor(
         gl: WebGL2RenderingContext,
         samplerTextureUnitMap: Record<string, number>
@@ -14,6 +17,45 @@ export class MaterialSystem {
         this.gl = gl;
         this.materials = new Map<number, MaterialData>();
         this.samplerTextureUnitMap = samplerTextureUnitMap;
+        this.createDefaultTextures();
+    }
+
+    private createDefaultTextures(): void {
+        // Create 1x1 default textures for missing material properties
+        const createTexture = (r: number, g: number, b: number, a: number): WebGLTexture => {
+            const texture = this.gl.createTexture();
+            if (!texture) throw new Error('Failed to create default texture');
+
+            this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+            this.gl.texImage2D(
+                this.gl.TEXTURE_2D, 0, this.gl.RGBA,
+                1, 1, 0,
+                this.gl.RGBA, this.gl.UNSIGNED_BYTE,
+                new Uint8Array([r, g, b, a])
+            );
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+
+            return texture;
+        };
+
+        // White texture for base color (255, 255, 255, 255)
+        this.defaultTextures.set('u_BaseColorSampler', createTexture(255, 255, 255, 255));
+
+        // Flat normal map (128, 128, 255) = (0.5, 0.5, 1.0) in normalized space
+        this.defaultTextures.set('u_NormalSampler', createTexture(128, 128, 255, 255));
+
+        // Metallic-Roughness: R=unused, G=roughness(max), B=metallic(0), A=255
+        // G=255 (max roughness), B=0 (no metallic)
+        this.defaultTextures.set('u_MetallicRoughnessSampler', createTexture(0, 255, 0, 255));
+
+        // White for occlusion (no occlusion = 1.0)
+        this.defaultTextures.set('u_OcclusionSampler', createTexture(255, 255, 255, 255));
+
+        // Black for emissive (no emission)
+        this.defaultTextures.set('u_EmissiveSampler', createTexture(0, 0, 0, 255));
     }
 
     cleanup(): void {
@@ -23,6 +65,12 @@ export class MaterialSystem {
             });
         });
         this.materials.clear();
+
+        // Clean up default textures
+        this.defaultTextures.forEach((texture) => {
+            this.gl.deleteTexture(texture);
+        });
+        this.defaultTextures.clear();
     }
 
     addMaterial(material: MaterialData): void {
@@ -41,42 +89,26 @@ export class MaterialSystem {
     }
 
     private applyMaterial(material: MaterialData, shader: WebGLProgram): void {
-        // First, unbind all possible texture units that might be used
-        // Clear all texture types to prevent conflicts with C3's existing bindings
-        for (const unit of Object.values(this.samplerTextureUnitMap)) {
-            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
-            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
-            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
-            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
-        }
-
-        // Then bind textures to their fixed texture units based on sampler names
-        material.textures.forEach((texture, samplerName) => {
-            const textureUnit = this.samplerTextureUnitMap[samplerName];
-            if (textureUnit === undefined) {
-                console.warn(`No texture unit defined for sampler '${samplerName}'.`);
-                return;
-            }
-
+        // Bind all samplers - either from material or use defaults
+        // This prevents texture state from leaking between materials
+        for (const [samplerName, textureUnit] of Object.entries(this.samplerTextureUnitMap)) {
             const location = this.gl.getUniformLocation(shader, samplerName);
-            const useTextureLoc = this.gl.getUniformLocation(shader, `u_Use${samplerName.slice(2)}`);
-            
-            if (texture && location !== null) {
-                // Texture exists, bind it and enable its use
-                this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
-                this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+            if (location === null) continue;
+
+            this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
+
+            // Get texture from material, or use default if missing
+            const materialTexture = material.textures.get(samplerName);
+            const textureToUse = materialTexture || this.defaultTextures.get(samplerName);
+
+            if (textureToUse) {
+                this.gl.bindTexture(this.gl.TEXTURE_2D, textureToUse);
                 this.gl.uniform1i(location, textureUnit);
-                if (useTextureLoc !== null) {
-                    this.gl.uniform1i(useTextureLoc, 1);
-                }
             } else {
-                // No texture, disable its use
-                if (useTextureLoc !== null) {
-                    this.gl.uniform1i(useTextureLoc, 0);
-                }
+                // No texture and no default - unbind to be safe
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
             }
-        });
+        }
 
         // Set material uniforms
         if (material.uniforms) {

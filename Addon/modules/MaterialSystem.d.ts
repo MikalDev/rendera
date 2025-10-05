@@ -4,7 +4,9 @@ export declare class MaterialSystem {
     private materials;
     private currentMaterial;
     private samplerTextureUnitMap;
+    private defaultTextures;
     constructor(gl: WebGL2RenderingContext, samplerTextureUnitMap: Record<string, number>);
+    private createDefaultTextures;
     cleanup(): void;
     addMaterial(material: MaterialData): void;
     bindMaterial(materialIndex: number, shader: WebGLProgram): void;

@@ -283,12 +283,17 @@ export class GPUResourceManager implements IGPUResourceManager {
 
             highp float handedness = tangent.w;
 
+            // Apply coordinate conversion to normals (GLB Y-up right-handed to C3 Y-down left-handed)
+            // This converts: Y-up to Y-down (flip Y), right-handed to left-handed (flip Z)
+            vec3 convertedNormal = normal * vec3(1.0, -1.0, -1.0);
+            vec3 convertedTangent = tangent.xyz * vec3(1.0, -1.0, -1.0);
+
             if (u_UseSkinning) {
                 for (int i = 0; i < 4; i++) {
                     uint joint = joints[i];
                     skinVertex += weights[i] * (u_BoneMatrices[joint] * vec4(position, 1.0));
-                    skinnedNormal += weights[i] * (mat3(u_BoneMatrices[joint]) * normal); // Apply skinning to normals
-                    skinnedTangent += weights[i] * (mat3(u_BoneMatrices[joint]) * tangent.xyz);
+                    skinnedNormal += weights[i] * (mat3(u_BoneMatrices[joint]) * convertedNormal);
+                    skinnedTangent += weights[i] * (mat3(u_BoneMatrices[joint]) * convertedTangent);
                 }
                 gl_Position = u_Projection * u_View * u_Model * skinVertex;
                 v_Position = (u_Model * skinVertex).xyz;
@@ -297,8 +302,8 @@ export class GPUResourceManager implements IGPUResourceManager {
             } else {
                 gl_Position = u_Projection * u_View * u_Model * u_NodeMatrix * vec4(nPosition, 1.0);
                 v_Position = (u_Model * u_NodeMatrix * vec4(nPosition, 1.0)).xyz;
-                N = normalize(u_NormalMatrix * normal);
-                T = normalize(u_NormalMatrix * tangent.xyz);
+                N = normalize(u_NormalMatrix * convertedNormal);
+                T = normalize(u_NormalMatrix * convertedTangent);
             }
 
             vec3 B = normalize(cross(N, T)) * handedness;
@@ -475,38 +480,48 @@ export class GPUResourceManager implements IGPUResourceManager {
                 vec3 lightDir = light.position - v_Position;
                 float distance = length(lightDir);
                 L = normalize(lightDir);
-                
+
                 // Spot light cone calculation
                 float cosTheta = dot(L, normalize(-light.direction));
                 float cosCutoff = light.cosAngle;
                 float cosOuterCutoff = light.cosAngle * (1.0 - light.spotPenumbra);
                 float epsilon = cosCutoff - cosOuterCutoff;
                 float spotIntensity = clamp((cosTheta - cosOuterCutoff) / epsilon, 0.0, 1.0);
-                
+
                 attenuation = spotIntensity / (1.0 + light.attenuation * distance * distance);
             }
             
             vec3 H = normalize(V + L);
-            
-            // Apply Lambert wrap for softer shadows
-            float NdotL = (dot(N, L) + u_LambertWrap) / (1.0 + u_LambertWrap);
-            NdotL = max(NdotL, 0.0);
-            
-            if (NdotL <= 0.0) return vec3(0.0);
-            
+
+            // Calculate NdotL
+            float NdotL = max(dot(N, L), 0.0);
+
+            // Apply Lambert wrap to soften lighting transitions (subsurface scattering effect)
+            // This only affects diffuse, keeping specular highlights sharp
+            float diffuseNdotL = (NdotL + u_LambertWrap) / (1.0 + u_LambertWrap);
+            diffuseNdotL = max(diffuseNdotL, 0.0);
+
+            // Early exit if no lighting contribution
+            if (diffuseNdotL <= 0.0) return vec3(0.0);
+
             // Calculate F0 (surface reflection at zero incidence)
             vec3 F0 = mix(vec3(0.04), baseColor, metallic);
-            
-            // Calculate specular and diffuse components
+
+            // Calculate PBR components using unwrapped NdotL for accurate specular
             vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+            float NdotV = max(dot(N, V), 0.0);
             float D = distributionGGX(N, H, roughness);
-            float G = geometrySmith(max(dot(N, V), 0.0), NdotL, roughness);
-            
-            vec3 specular = (F * D * G) / max(4.0 * max(dot(N, V), 0.0) * NdotL, 0.001);
+            float G = geometrySmith(NdotV, max(NdotL, 0.001), roughness);
+
+            // Cook-Torrance specular BRDF (uses unwrapped NdotL for sharp highlights)
+            vec3 specular = (D * F * G) / max(4.0 * NdotV * max(NdotL, 0.001), 0.001);
+
+            // Energy-conserving diffuse
             vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
             vec3 diffuse = kD * baseColor / PI;
-            
-            return (diffuse + specular) * light.color * light.intensity * NdotL * attenuation;
+
+            // Combine: diffuse uses wrapped NdotL (soft), specular uses unwrapped NdotL (sharp)
+            return (diffuse * diffuseNdotL + specular * max(NdotL, 0.0)) * light.color * light.intensity * attenuation;
         }
 
         float calculateShadowForMap(vec4 fragPosLightSpace, int shadowMapIndex, Light light) {
@@ -598,11 +613,8 @@ export class GPUResourceManager implements IGPUResourceManager {
                 int shadowMapIndex = u_LightToShadowMap[i];
                 if (shadowMapIndex >= 0 && shadowMapIndex < MAX_SHADOW_MAPS) {
                     shadow = calculateShadowForMap(v_PositionsFromLight[shadowMapIndex], shadowMapIndex, u_Lights[i]);
-                    // Soften shadow edges with Lambert wrap
-                    // When wrap is 1.0, shadows become much softer
-                    shadow = mix(shadow, 1.0, u_LambertWrap * 0.5);
                 }
-                
+
                 color += lightContrib * shadow;
             }
             
@@ -618,9 +630,7 @@ export class GPUResourceManager implements IGPUResourceManager {
             }
             
             // Add ambient (including GI), AO, and emissive (unaffected by shadows)
-            // Lambert wrap also increases base ambient to fill in shadows
-            float baseAmbient = 0.03 + (u_LambertWrap * 0.1);
-            vec3 ambient = (vec3(baseAmbient) + hemisphericAmbient) * baseColor * aoSample;
+            vec3 ambient = hemisphericAmbient * baseColor * aoSample;
             vec3 emissive = SRGBtoLinear(emissiveSample.rgb);
             color += ambient + emissive;
             
