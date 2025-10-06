@@ -48,3 +48,6 @@ export * from './ShadowMapManager';
 
 /// <reference path="./types.d.ts" />
 export * from './types';
+
+/// <reference path="./WebGLStateTracker.d.ts" />
+export * from './WebGLStateTracker';

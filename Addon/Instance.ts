@@ -1,5 +1,5 @@
-import { GPUResourceManager, InstanceManager, ModelLoader } from './modules/index.js';
-import { mat4 } from './modules/gl-matrix.js'
+import { GPUResourceManager, InstanceManager, ModelLoader, WebGLStateTracker } from './modules/index.js';
+import { mat4 } from './modules/gl-matrix.js';
 
 class LostInstance extends globalThis.ISDKInstanceBase {
 
@@ -9,6 +9,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	public gpuResourceManager!: GPUResourceManager;
 	public instanceManager!: InstanceManager;
 	public modelLoader!: ModelLoader;
+	public webGLStateTracker!: WebGLStateTracker;
 	public get shadowMapManager() {
 		return this.instanceManager?.getShadowMapManager();
 	}
@@ -18,7 +19,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	private _currentTick = -1;
 	private _lastLoadedModelPath: string = '';
 	private _useAnimationWorker: boolean = false; // Default to false for testing
-	
+
 	public initialized = false;
 
 	constructor() {
@@ -45,7 +46,28 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		// @ts-ignore
 		const renderer = globalThis.verySadLands;
 		const gl = renderer._gl;
-		console.log('[rendera] WebGL2 supported', gl);;
+		console.log('[rendera] WebGL2 supported', gl);
+
+		// Initialize WebGL state tracker
+		this.webGLStateTracker = WebGLStateTracker.initialize(gl);
+		console.info('[rendera] WebGL state tracker initialized', this.webGLStateTracker);
+
+		// Take initial snapshot
+		const initialSnapshot = this.webGLStateTracker.snapshot();
+		console.log('[rendera] Initial WebGL state snapshot:', this.webGLStateTracker.snapshotToLoggable(initialSnapshot));
+
+		// Make state tracker available globally for debugging
+		// @ts-ignore
+		globalThis.renderaWebGLState = {
+			snapshot: () => this.webGLStateTracker.snapshot(),
+			restore: (snapshot: any) => this.webGLStateTracker.restore(snapshot),
+			state: this.webGLStateTracker.getState(),
+			original: this.webGLStateTracker.getOriginalMethods(),
+			snapshotToLoggable: (snapshot: any) => this.webGLStateTracker.snapshotToLoggable(snapshot),
+			verifyMonkeypatch: () => this.webGLStateTracker.verifyMonkeypatch(),
+			initialSnapshot: initialSnapshot
+		};
+
 		// Initialize managers
 		this.gpuResourceManager = new GPUResourceManager(gl);
 		this.modelLoader = new ModelLoader(gl, this.gpuResourceManager);
