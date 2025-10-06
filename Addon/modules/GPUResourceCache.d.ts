@@ -1,6 +1,7 @@
 import { IGPUResourceCache } from './types';
 export declare class GPUResourceCache implements IGPUResourceCache {
     private gl;
+    private cachedModelState;
     private cachedState;
     private static readonly TRACKED_UBO_BINDING_POINTS;
     private tempShadowState;

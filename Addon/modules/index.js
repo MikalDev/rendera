@@ -14429,33 +14429,514 @@ class ModelLoader {
 // @ts-ignore
 globalThis.ModelLoader = ModelLoader;
 
+/**
+ * WebGL2 State Tracker - Captures and restores WebGL state
+ */
+class WebGLStateTracker {
+    constructor(gl) {
+        this.gl = gl;
+        // Initialize state
+        this.state = {
+            activeTexture: gl.TEXTURE0,
+            textureBindings: new Map(),
+            boundFramebuffer: null,
+            boundReadFramebuffer: null,
+            boundDrawFramebuffer: null,
+            boundArrayBuffer: null,
+            boundElementArrayBuffer: null,
+            boundUniformBuffer: null,
+            boundTransformFeedbackBuffer: null,
+            uniformBufferBindings: new Map(),
+            boundVertexArray: null,
+            currentProgram: null,
+            viewport: [0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight],
+            scissorBox: [0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight],
+            capabilities: new Map([
+                [gl.BLEND, false],
+                [gl.CULL_FACE, false],
+                [gl.DEPTH_TEST, false],
+                [gl.DITHER, true],
+                [gl.POLYGON_OFFSET_FILL, false],
+                [gl.SAMPLE_ALPHA_TO_COVERAGE, false],
+                [gl.SAMPLE_COVERAGE, false],
+                [gl.SCISSOR_TEST, false],
+                [gl.STENCIL_TEST, false],
+            ]),
+            blendSrcRGB: gl.ONE,
+            blendDstRGB: gl.ZERO,
+            blendSrcAlpha: gl.ONE,
+            blendDstAlpha: gl.ZERO,
+            blendEquationRGB: gl.FUNC_ADD,
+            blendEquationAlpha: gl.FUNC_ADD,
+            blendColor: [0, 0, 0, 0],
+            depthFunc: gl.LESS,
+            depthMask: true,
+            depthRange: [0, 1],
+            stencilFunc: gl.ALWAYS,
+            stencilRef: 0,
+            stencilMask: 0xFFFFFFFF,
+            stencilFail: gl.KEEP,
+            stencilZFail: gl.KEEP,
+            stencilZPass: gl.KEEP,
+            colorMask: [true, true, true, true],
+            clearColor: [0, 0, 0, 0],
+            cullFaceMode: gl.BACK,
+            frontFace: gl.CCW,
+            polygonOffsetFactor: 0,
+            polygonOffsetUnits: 0,
+            pixelStorei: new Map([
+                [gl.UNPACK_ALIGNMENT, 4],
+                [gl.UNPACK_FLIP_Y_WEBGL, false],
+                [gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false],
+                [gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.BROWSER_DEFAULT_WEBGL],
+            ]),
+        };
+        // Store original methods
+        this.original = {
+            activeTexture: gl.activeTexture.bind(gl),
+            bindTexture: gl.bindTexture.bind(gl),
+            bindFramebuffer: gl.bindFramebuffer.bind(gl),
+            bindBuffer: gl.bindBuffer.bind(gl),
+            bindBufferBase: gl.bindBufferBase.bind(gl),
+            bindVertexArray: gl.bindVertexArray.bind(gl),
+            useProgram: gl.useProgram.bind(gl),
+            viewport: gl.viewport.bind(gl),
+            scissor: gl.scissor.bind(gl),
+            enable: gl.enable.bind(gl),
+            disable: gl.disable.bind(gl),
+            blendFunc: gl.blendFunc.bind(gl),
+            blendFuncSeparate: gl.blendFuncSeparate.bind(gl),
+            blendEquation: gl.blendEquation.bind(gl),
+            blendEquationSeparate: gl.blendEquationSeparate.bind(gl),
+            blendColor: gl.blendColor.bind(gl),
+            depthFunc: gl.depthFunc.bind(gl),
+            depthMask: gl.depthMask.bind(gl),
+            depthRange: gl.depthRange.bind(gl),
+            stencilFunc: gl.stencilFunc.bind(gl),
+            stencilMask: gl.stencilMask.bind(gl),
+            stencilOp: gl.stencilOp.bind(gl),
+            colorMask: gl.colorMask.bind(gl),
+            clearColor: gl.clearColor.bind(gl),
+            cullFace: gl.cullFace.bind(gl),
+            frontFace: gl.frontFace.bind(gl),
+            polygonOffset: gl.polygonOffset.bind(gl),
+            pixelStorei: gl.pixelStorei.bind(gl),
+        };
+        this.applyMonkeypatch();
+    }
+    /**
+     * Initialize or get the singleton instance
+     */
+    static initialize(gl) {
+        if (!WebGLStateTracker.instance) {
+            WebGLStateTracker.instance = new WebGLStateTracker(gl);
+        }
+        return WebGLStateTracker.instance;
+    }
+    /**
+     * Get the current instance
+     */
+    static getInstance() {
+        return WebGLStateTracker.instance;
+    }
+    /**
+     * Apply monkeypatch to WebGL context
+     */
+    applyMonkeypatch() {
+        const gl = this.gl;
+        const state = this.state;
+        const original = this.original;
+        // Monkeypatch methods
+        gl.activeTexture = (texture) => {
+            state.activeTexture = texture;
+            return original.activeTexture(texture);
+        };
+        gl.bindTexture = (target, texture) => {
+            const unit = state.activeTexture - gl.TEXTURE0;
+            if (!state.textureBindings.has(unit)) {
+                state.textureBindings.set(unit, {});
+            }
+            state.textureBindings.get(unit)[target] = texture;
+            return original.bindTexture(target, texture);
+        };
+        gl.bindFramebuffer = (target, framebuffer) => {
+            if (target === gl.FRAMEBUFFER) {
+                state.boundFramebuffer = framebuffer;
+                state.boundReadFramebuffer = framebuffer;
+                state.boundDrawFramebuffer = framebuffer;
+            }
+            else if (target === gl.READ_FRAMEBUFFER) {
+                state.boundReadFramebuffer = framebuffer;
+            }
+            else if (target === gl.DRAW_FRAMEBUFFER) {
+                state.boundDrawFramebuffer = framebuffer;
+            }
+            return original.bindFramebuffer(target, framebuffer);
+        };
+        gl.bindBuffer = (target, buffer) => {
+            if (target === gl.ARRAY_BUFFER) {
+                state.boundArrayBuffer = buffer;
+            }
+            else if (target === gl.ELEMENT_ARRAY_BUFFER) {
+                state.boundElementArrayBuffer = buffer;
+            }
+            else if (target === gl.UNIFORM_BUFFER) {
+                state.boundUniformBuffer = buffer;
+            }
+            else if (target === gl.TRANSFORM_FEEDBACK_BUFFER) {
+                state.boundTransformFeedbackBuffer = buffer;
+            }
+            return original.bindBuffer(target, buffer);
+        };
+        gl.bindBufferBase = (target, index, buffer) => {
+            if (target === gl.UNIFORM_BUFFER) {
+                state.uniformBufferBindings.set(index, buffer);
+            }
+            return original.bindBufferBase(target, index, buffer);
+        };
+        gl.bindVertexArray = (vao) => {
+            state.boundVertexArray = vao;
+            return original.bindVertexArray(vao);
+        };
+        gl.useProgram = (program) => {
+            state.currentProgram = program;
+            return original.useProgram(program);
+        };
+        gl.viewport = (x, y, width, height) => {
+            state.viewport = [x, y, width, height];
+            return original.viewport(x, y, width, height);
+        };
+        gl.scissor = (x, y, width, height) => {
+            state.scissorBox = [x, y, width, height];
+            return original.scissor(x, y, width, height);
+        };
+        gl.enable = (cap) => {
+            state.capabilities.set(cap, true);
+            return original.enable(cap);
+        };
+        gl.disable = (cap) => {
+            state.capabilities.set(cap, false);
+            return original.disable(cap);
+        };
+        gl.blendFunc = (sfactor, dfactor) => {
+            state.blendSrcRGB = sfactor;
+            state.blendDstRGB = dfactor;
+            state.blendSrcAlpha = sfactor;
+            state.blendDstAlpha = dfactor;
+            return original.blendFunc(sfactor, dfactor);
+        };
+        gl.blendFuncSeparate = (srcRGB, dstRGB, srcAlpha, dstAlpha) => {
+            state.blendSrcRGB = srcRGB;
+            state.blendDstRGB = dstRGB;
+            state.blendSrcAlpha = srcAlpha;
+            state.blendDstAlpha = dstAlpha;
+            return original.blendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha);
+        };
+        gl.blendEquation = (mode) => {
+            state.blendEquationRGB = mode;
+            state.blendEquationAlpha = mode;
+            return original.blendEquation(mode);
+        };
+        gl.blendEquationSeparate = (modeRGB, modeAlpha) => {
+            state.blendEquationRGB = modeRGB;
+            state.blendEquationAlpha = modeAlpha;
+            return original.blendEquationSeparate(modeRGB, modeAlpha);
+        };
+        gl.blendColor = (r, g, b, a) => {
+            state.blendColor = [r, g, b, a];
+            return original.blendColor(r, g, b, a);
+        };
+        gl.depthFunc = (func) => {
+            state.depthFunc = func;
+            return original.depthFunc(func);
+        };
+        gl.depthMask = (flag) => {
+            state.depthMask = flag;
+            return original.depthMask(flag);
+        };
+        gl.depthRange = (zNear, zFar) => {
+            state.depthRange = [zNear, zFar];
+            return original.depthRange(zNear, zFar);
+        };
+        gl.stencilFunc = (func, ref, mask) => {
+            state.stencilFunc = func;
+            state.stencilRef = ref;
+            state.stencilMask = mask;
+            return original.stencilFunc(func, ref, mask);
+        };
+        gl.stencilMask = (mask) => {
+            state.stencilMask = mask;
+            return original.stencilMask(mask);
+        };
+        gl.stencilOp = (fail, zfail, zpass) => {
+            state.stencilFail = fail;
+            state.stencilZFail = zfail;
+            state.stencilZPass = zpass;
+            return original.stencilOp(fail, zfail, zpass);
+        };
+        gl.colorMask = (r, g, b, a) => {
+            state.colorMask = [r, g, b, a];
+            return original.colorMask(r, g, b, a);
+        };
+        gl.clearColor = (r, g, b, a) => {
+            state.clearColor = [r, g, b, a];
+            return original.clearColor(r, g, b, a);
+        };
+        gl.cullFace = (mode) => {
+            state.cullFaceMode = mode;
+            return original.cullFace(mode);
+        };
+        gl.frontFace = (mode) => {
+            state.frontFace = mode;
+            return original.frontFace(mode);
+        };
+        gl.polygonOffset = (factor, units) => {
+            state.polygonOffsetFactor = factor;
+            state.polygonOffsetUnits = units;
+            return original.polygonOffset(factor, units);
+        };
+        gl.pixelStorei = (pname, param) => {
+            state.pixelStorei.set(pname, param);
+            return original.pixelStorei(pname, param);
+        };
+        console.log("[rendera] WebGL state tracker monkeypatch applied successfully");
+        console.log("[rendera] Patched methods:", Object.keys(original));
+        const verification = this.verifyMonkeypatch();
+        const status = verification.success ? "SUCCESS" : "FAILED";
+        console.log(`[rendera] Monkeypatch verification: ${status}`, verification);
+    }
+    /**
+     * Verify that monkeypatch was applied successfully
+     */
+    verifyMonkeypatch() {
+        const patchedMethods = [];
+        const unpatchedMethods = [];
+        for (const [methodName, originalMethod] of Object.entries(this.original)) {
+            if (this.gl[methodName] !== originalMethod) {
+                patchedMethods.push(methodName);
+            }
+            else {
+                unpatchedMethods.push(methodName);
+            }
+        }
+        return {
+            success: unpatchedMethods.length === 0,
+            patchedMethods,
+            unpatchedMethods,
+            totalMethods: Object.keys(this.original).length
+        };
+    }
+    /**
+     * Take a snapshot of the current WebGL state
+     */
+    snapshot() {
+        // Deep copy texture bindings
+        const textureBindingsCopy = new Map();
+        for (const [unit, bindings] of this.state.textureBindings.entries()) {
+            textureBindingsCopy.set(unit, { ...bindings });
+        }
+        return {
+            activeTexture: this.state.activeTexture,
+            textureBindings: textureBindingsCopy,
+            boundFramebuffer: this.state.boundFramebuffer,
+            boundReadFramebuffer: this.state.boundReadFramebuffer,
+            boundDrawFramebuffer: this.state.boundDrawFramebuffer,
+            boundArrayBuffer: this.state.boundArrayBuffer,
+            boundElementArrayBuffer: this.state.boundElementArrayBuffer,
+            boundUniformBuffer: this.state.boundUniformBuffer,
+            boundTransformFeedbackBuffer: this.state.boundTransformFeedbackBuffer,
+            uniformBufferBindings: new Map(this.state.uniformBufferBindings),
+            boundVertexArray: this.state.boundVertexArray,
+            currentProgram: this.state.currentProgram,
+            viewport: [...this.state.viewport],
+            scissorBox: [...this.state.scissorBox],
+            capabilities: new Map(this.state.capabilities),
+            blendSrcRGB: this.state.blendSrcRGB,
+            blendDstRGB: this.state.blendDstRGB,
+            blendSrcAlpha: this.state.blendSrcAlpha,
+            blendDstAlpha: this.state.blendDstAlpha,
+            blendEquationRGB: this.state.blendEquationRGB,
+            blendEquationAlpha: this.state.blendEquationAlpha,
+            blendColor: [...this.state.blendColor],
+            depthFunc: this.state.depthFunc,
+            depthMask: this.state.depthMask,
+            depthRange: [...this.state.depthRange],
+            stencilFunc: this.state.stencilFunc,
+            stencilRef: this.state.stencilRef,
+            stencilMask: this.state.stencilMask,
+            stencilFail: this.state.stencilFail,
+            stencilZFail: this.state.stencilZFail,
+            stencilZPass: this.state.stencilZPass,
+            colorMask: [...this.state.colorMask],
+            clearColor: [...this.state.clearColor],
+            cullFaceMode: this.state.cullFaceMode,
+            frontFace: this.state.frontFace,
+            polygonOffsetFactor: this.state.polygonOffsetFactor,
+            polygonOffsetUnits: this.state.polygonOffsetUnits,
+            pixelStorei: new Map(this.state.pixelStorei),
+        };
+    }
+    /**
+     * Restore WebGL state from a snapshot
+     */
+    restore(snapshot) {
+        const gl = this.gl;
+        const original = this.original;
+        // Restore textures
+        original.activeTexture(snapshot.activeTexture);
+        for (const [unit, bindings] of snapshot.textureBindings.entries()) {
+            original.activeTexture(gl.TEXTURE0 + unit);
+            for (const [target, texture] of Object.entries(bindings)) {
+                original.bindTexture(Number(target), texture);
+            }
+        }
+        original.activeTexture(snapshot.activeTexture);
+        // Restore framebuffers
+        original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer);
+        if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
+            original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer);
+        }
+        if (snapshot.boundDrawFramebuffer !== snapshot.boundFramebuffer) {
+            original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer);
+        }
+        // IMPORTANT: Restore VAO first, before element array buffer
+        // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
+        // so we must restore the VAO before restoring the element buffer
+        original.bindVertexArray(snapshot.boundVertexArray);
+        // Now restore buffers (including element array buffer)
+        original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer);
+        original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer);
+        if (snapshot.boundUniformBuffer !== undefined) {
+            original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
+        }
+        if (snapshot.boundTransformFeedbackBuffer !== undefined) {
+            original.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, snapshot.boundTransformFeedbackBuffer);
+        }
+        // Restore uniform buffer base bindings
+        if (snapshot.uniformBufferBindings) {
+            for (const [index, buffer] of snapshot.uniformBufferBindings.entries()) {
+                original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
+            }
+        }
+        // Restore program
+        original.useProgram(snapshot.currentProgram);
+        // Restore viewport and scissor
+        original.viewport(...snapshot.viewport);
+        original.scissor(...snapshot.scissorBox);
+        // Restore capabilities
+        for (const [cap, enabled] of snapshot.capabilities.entries()) {
+            if (enabled) {
+                original.enable(cap);
+            }
+            else {
+                original.disable(cap);
+            }
+        }
+        // Restore blend state
+        original.blendFuncSeparate(snapshot.blendSrcRGB, snapshot.blendDstRGB, snapshot.blendSrcAlpha, snapshot.blendDstAlpha);
+        original.blendEquationSeparate(snapshot.blendEquationRGB, snapshot.blendEquationAlpha);
+        original.blendColor(...snapshot.blendColor);
+        // Restore depth state
+        original.depthFunc(snapshot.depthFunc);
+        original.depthMask(snapshot.depthMask);
+        original.depthRange(...snapshot.depthRange);
+        // Restore stencil state
+        original.stencilFunc(snapshot.stencilFunc, snapshot.stencilRef, snapshot.stencilMask);
+        original.stencilOp(snapshot.stencilFail, snapshot.stencilZFail, snapshot.stencilZPass);
+        // Restore color state
+        original.colorMask(...snapshot.colorMask);
+        original.clearColor(...snapshot.clearColor);
+        // Restore culling
+        original.cullFace(snapshot.cullFaceMode);
+        original.frontFace(snapshot.frontFace);
+        // Restore polygon offset
+        original.polygonOffset(snapshot.polygonOffsetFactor, snapshot.polygonOffsetUnits);
+        // Restore pixel store parameters
+        if (snapshot.pixelStorei) {
+            for (const [pname, value] of snapshot.pixelStorei.entries()) {
+                original.pixelStorei(pname, value);
+            }
+        }
+        // Update internal state
+        this.state = this.snapshot(); // Re-snapshot to update internal state
+    }
+    /**
+     * Get the current state
+     */
+    getState() {
+        return this.state;
+    }
+    /**
+     * Get original WebGL methods
+     */
+    getOriginalMethods() {
+        return this.original;
+    }
+    /**
+     * Convert snapshot to loggable format
+     */
+    snapshotToLoggable(snapshot) {
+        const result = { ...snapshot };
+        // Convert Maps to objects for better console logging
+        if (result.textureBindings instanceof Map) {
+            result.textureBindings = Object.fromEntries(result.textureBindings);
+        }
+        if (result.capabilities instanceof Map) {
+            result.capabilities = Object.fromEntries(result.capabilities);
+        }
+        if (result.pixelStorei instanceof Map) {
+            result.pixelStorei = Object.fromEntries(result.pixelStorei);
+        }
+        return result;
+    }
+}
+WebGLStateTracker.instance = null;
+
 class GPUResourceCache {
     constructor(gl) {
+        // New: Using WebGLState snapshot instead of manual state tracking
+        this.cachedModelState = null;
+        // Old implementation kept for reference/comparison
         this.cachedState = null;
         // Temporary shadow map state - not persistent between calls
         this.tempShadowState = null;
         this.gl = gl;
     }
     cacheModelMode() {
-        // console.log('[rendera] GPUResourceCache: cacheModelMode');
+        // New implementation using WebGLStateTracker
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker) {
+            this.cachedModelState = tracker.snapshot();
+            return;
+        }
+        // Fallback to old implementation if tracker not available
+        // console.log('[rendera] GPUResourceCache: cacheModelMode (fallback)');
+        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
         // Get currently bound VAO
         const vao = this.gl.getParameter(this.gl.VERTEX_ARRAY_BINDING);
+
         // Get currently bound texture
         const textureBinding = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+
         // Get current shader program
         const shaderProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
+
         // Get current element array buffer
         const elementArrayBuffer = this.gl.getParameter(this.gl.ELEMENT_ARRAY_BUFFER_BINDING);
+
         // Get active texture unit
         const activeTexture = this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+
         // Get array buffer binding
         const arrayBuffer = this.gl.getParameter(this.gl.ARRAY_BUFFER_BINDING);
+
         // Get uniform buffer bindings for tracked binding points
-        const uniformBufferBindings = [];
+        const uniformBufferBindings: (WebGLBuffer | null)[] = [];
         for (const bindingPoint of GPUResourceCache.TRACKED_UBO_BINDING_POINTS) {
             const buffer = this.gl.getIndexedParameter(this.gl.UNIFORM_BUFFER_BINDING, bindingPoint);
             uniformBufferBindings.push(buffer);
         }
+
         this.cachedState = {
             vao,
             textureBinding,
@@ -14466,23 +14947,42 @@ class GPUResourceCache {
             uniformBufferBindings
         };
         //console.log('[rendera] GPUResourceCache: cachedState', this.cachedState);
+        */
     }
     restoreModelMode() {
-        // console.log('[rendera] GPUResourceCache: restoreModelMode');
+        // New implementation using WebGLStateTracker
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker && this.cachedModelState) {
+            // Clean up texture units before restoring (same as old implementation)
+            this.cleanupTextureUnits();
+            // Restore the complete WebGL state
+            tracker.restore(this.cachedModelState);
+            // Clear cached state after restoration
+            this.cachedModelState = null;
+            return;
+        }
+        // Fallback to old implementation if tracker not available
+        // console.log('[rendera] GPUResourceCache: restoreModelMode (fallback)');
+        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
         if (this.cachedState) {
             // console.log('[rendera] GPUResourceCache: restoreModelMode', this.cachedState);
+
             // First, clean up any texture bindings we might have created on units 1-17
             // This ensures C3 doesn't encounter unexpected textures
             this.cleanupTextureUnits();
+
             // Restore active texture unit first (before binding textures)
             this.gl.activeTexture(this.cachedState.activeTexture);
+
             // Restore original 4 states
             this.gl.bindVertexArray(this.cachedState.vao);
             this.gl.bindTexture(this.gl.TEXTURE_2D, this.cachedState.textureBinding);
             this.gl.useProgram(this.cachedState.shaderProgram);
             this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.cachedState.elementArrayBuffer);
+
             // Restore additional states
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.cachedState.arrayBuffer);
+
             // Restore uniform buffer bindings
             for (let i = 0; i < this.cachedState.uniformBufferBindings.length; i++) {
                 const bindingPoint = GPUResourceCache.TRACKED_UBO_BINDING_POINTS[i];
@@ -14491,18 +14991,20 @@ class GPUResourceCache {
                     this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, bindingPoint, buffer);
                 }
             }
+
             // Clear cached state after restoration
             this.cachedState = null;
         }
+        */
     }
     /**
      * Clean up texture bindings on units we use (1-17) to avoid conflicts with C3
      * We skip unit 0 as it will be restored from cached state
      */
     cleanupTextureUnits() {
-        var _a, _b;
-        // Use cached activeTexture if available, otherwise query GL
-        const currentActiveTexture = (_b = (_a = this.cachedState) === null || _a === void 0 ? void 0 : _a.activeTexture) !== null && _b !== void 0 ? _b : this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+        var _a, _b, _c, _d;
+        // Use cached activeTexture from new state, fallback to old state, or query GL
+        const currentActiveTexture = (_d = (_b = (_a = this.cachedModelState) === null || _a === void 0 ? void 0 : _a.activeTexture) !== null && _b !== void 0 ? _b : (_c = this.cachedState) === null || _c === void 0 ? void 0 : _c.activeTexture) !== null && _d !== void 0 ? _d : this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
         // Clean material texture units (1-4)
         for (let unit = 1; unit <= 4; unit++) {
             this.gl.activeTexture(this.gl.TEXTURE0 + unit);
@@ -18490,451 +18992,5 @@ class InstanceManager {
 }
 // @ts-ignore
 globalThis.InstanceManager = InstanceManager;
-
-/**
- * WebGL2 State Tracker - Captures and restores WebGL state
- */
-class WebGLStateTracker {
-    constructor(gl) {
-        this.gl = gl;
-        // Initialize state
-        this.state = {
-            activeTexture: gl.TEXTURE0,
-            textureBindings: new Map(),
-            boundFramebuffer: null,
-            boundReadFramebuffer: null,
-            boundDrawFramebuffer: null,
-            boundArrayBuffer: null,
-            boundElementArrayBuffer: null,
-            boundUniformBuffer: null,
-            boundTransformFeedbackBuffer: null,
-            boundVertexArray: null,
-            currentProgram: null,
-            viewport: [0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight],
-            scissorBox: [0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight],
-            capabilities: new Map([
-                [gl.BLEND, false],
-                [gl.CULL_FACE, false],
-                [gl.DEPTH_TEST, false],
-                [gl.DITHER, true],
-                [gl.POLYGON_OFFSET_FILL, false],
-                [gl.SAMPLE_ALPHA_TO_COVERAGE, false],
-                [gl.SAMPLE_COVERAGE, false],
-                [gl.SCISSOR_TEST, false],
-                [gl.STENCIL_TEST, false],
-            ]),
-            blendSrcRGB: gl.ONE,
-            blendDstRGB: gl.ZERO,
-            blendSrcAlpha: gl.ONE,
-            blendDstAlpha: gl.ZERO,
-            blendEquationRGB: gl.FUNC_ADD,
-            blendEquationAlpha: gl.FUNC_ADD,
-            blendColor: [0, 0, 0, 0],
-            depthFunc: gl.LESS,
-            depthMask: true,
-            depthRange: [0, 1],
-            stencilFunc: gl.ALWAYS,
-            stencilRef: 0,
-            stencilMask: 0xFFFFFFFF,
-            stencilFail: gl.KEEP,
-            stencilZFail: gl.KEEP,
-            stencilZPass: gl.KEEP,
-            colorMask: [true, true, true, true],
-            clearColor: [0, 0, 0, 0],
-            cullFaceMode: gl.BACK,
-            frontFace: gl.CCW,
-            polygonOffsetFactor: 0,
-            polygonOffsetUnits: 0,
-            pixelStorei: new Map([
-                [gl.UNPACK_ALIGNMENT, 4],
-                [gl.UNPACK_FLIP_Y_WEBGL, false],
-                [gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false],
-                [gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.BROWSER_DEFAULT_WEBGL],
-            ]),
-        };
-        // Store original methods
-        this.original = {
-            activeTexture: gl.activeTexture.bind(gl),
-            bindTexture: gl.bindTexture.bind(gl),
-            bindFramebuffer: gl.bindFramebuffer.bind(gl),
-            bindBuffer: gl.bindBuffer.bind(gl),
-            bindVertexArray: gl.bindVertexArray.bind(gl),
-            useProgram: gl.useProgram.bind(gl),
-            viewport: gl.viewport.bind(gl),
-            scissor: gl.scissor.bind(gl),
-            enable: gl.enable.bind(gl),
-            disable: gl.disable.bind(gl),
-            blendFunc: gl.blendFunc.bind(gl),
-            blendFuncSeparate: gl.blendFuncSeparate.bind(gl),
-            blendEquation: gl.blendEquation.bind(gl),
-            blendEquationSeparate: gl.blendEquationSeparate.bind(gl),
-            blendColor: gl.blendColor.bind(gl),
-            depthFunc: gl.depthFunc.bind(gl),
-            depthMask: gl.depthMask.bind(gl),
-            depthRange: gl.depthRange.bind(gl),
-            stencilFunc: gl.stencilFunc.bind(gl),
-            stencilMask: gl.stencilMask.bind(gl),
-            stencilOp: gl.stencilOp.bind(gl),
-            colorMask: gl.colorMask.bind(gl),
-            clearColor: gl.clearColor.bind(gl),
-            cullFace: gl.cullFace.bind(gl),
-            frontFace: gl.frontFace.bind(gl),
-            polygonOffset: gl.polygonOffset.bind(gl),
-            pixelStorei: gl.pixelStorei.bind(gl),
-        };
-        this.applyMonkeypatch();
-    }
-    /**
-     * Initialize or get the singleton instance
-     */
-    static initialize(gl) {
-        if (!WebGLStateTracker.instance) {
-            WebGLStateTracker.instance = new WebGLStateTracker(gl);
-        }
-        return WebGLStateTracker.instance;
-    }
-    /**
-     * Get the current instance
-     */
-    static getInstance() {
-        return WebGLStateTracker.instance;
-    }
-    /**
-     * Apply monkeypatch to WebGL context
-     */
-    applyMonkeypatch() {
-        const gl = this.gl;
-        const state = this.state;
-        const original = this.original;
-        // Monkeypatch methods
-        gl.activeTexture = (texture) => {
-            state.activeTexture = texture;
-            return original.activeTexture(texture);
-        };
-        gl.bindTexture = (target, texture) => {
-            const unit = state.activeTexture - gl.TEXTURE0;
-            if (!state.textureBindings.has(unit)) {
-                state.textureBindings.set(unit, {});
-            }
-            state.textureBindings.get(unit)[target] = texture;
-            return original.bindTexture(target, texture);
-        };
-        gl.bindFramebuffer = (target, framebuffer) => {
-            if (target === gl.FRAMEBUFFER) {
-                state.boundFramebuffer = framebuffer;
-                state.boundReadFramebuffer = framebuffer;
-                state.boundDrawFramebuffer = framebuffer;
-            }
-            else if (target === gl.READ_FRAMEBUFFER) {
-                state.boundReadFramebuffer = framebuffer;
-            }
-            else if (target === gl.DRAW_FRAMEBUFFER) {
-                state.boundDrawFramebuffer = framebuffer;
-            }
-            return original.bindFramebuffer(target, framebuffer);
-        };
-        gl.bindBuffer = (target, buffer) => {
-            if (target === gl.ARRAY_BUFFER) {
-                state.boundArrayBuffer = buffer;
-            }
-            else if (target === gl.ELEMENT_ARRAY_BUFFER) {
-                state.boundElementArrayBuffer = buffer;
-            }
-            else if (target === gl.UNIFORM_BUFFER) {
-                state.boundUniformBuffer = buffer;
-            }
-            else if (target === gl.TRANSFORM_FEEDBACK_BUFFER) {
-                state.boundTransformFeedbackBuffer = buffer;
-            }
-            return original.bindBuffer(target, buffer);
-        };
-        gl.bindVertexArray = (vao) => {
-            state.boundVertexArray = vao;
-            return original.bindVertexArray(vao);
-        };
-        gl.useProgram = (program) => {
-            state.currentProgram = program;
-            return original.useProgram(program);
-        };
-        gl.viewport = (x, y, width, height) => {
-            state.viewport = [x, y, width, height];
-            return original.viewport(x, y, width, height);
-        };
-        gl.scissor = (x, y, width, height) => {
-            state.scissorBox = [x, y, width, height];
-            return original.scissor(x, y, width, height);
-        };
-        gl.enable = (cap) => {
-            state.capabilities.set(cap, true);
-            return original.enable(cap);
-        };
-        gl.disable = (cap) => {
-            state.capabilities.set(cap, false);
-            return original.disable(cap);
-        };
-        gl.blendFunc = (sfactor, dfactor) => {
-            state.blendSrcRGB = sfactor;
-            state.blendDstRGB = dfactor;
-            state.blendSrcAlpha = sfactor;
-            state.blendDstAlpha = dfactor;
-            return original.blendFunc(sfactor, dfactor);
-        };
-        gl.blendFuncSeparate = (srcRGB, dstRGB, srcAlpha, dstAlpha) => {
-            state.blendSrcRGB = srcRGB;
-            state.blendDstRGB = dstRGB;
-            state.blendSrcAlpha = srcAlpha;
-            state.blendDstAlpha = dstAlpha;
-            return original.blendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha);
-        };
-        gl.blendEquation = (mode) => {
-            state.blendEquationRGB = mode;
-            state.blendEquationAlpha = mode;
-            return original.blendEquation(mode);
-        };
-        gl.blendEquationSeparate = (modeRGB, modeAlpha) => {
-            state.blendEquationRGB = modeRGB;
-            state.blendEquationAlpha = modeAlpha;
-            return original.blendEquationSeparate(modeRGB, modeAlpha);
-        };
-        gl.blendColor = (r, g, b, a) => {
-            state.blendColor = [r, g, b, a];
-            return original.blendColor(r, g, b, a);
-        };
-        gl.depthFunc = (func) => {
-            state.depthFunc = func;
-            return original.depthFunc(func);
-        };
-        gl.depthMask = (flag) => {
-            state.depthMask = flag;
-            return original.depthMask(flag);
-        };
-        gl.depthRange = (zNear, zFar) => {
-            state.depthRange = [zNear, zFar];
-            return original.depthRange(zNear, zFar);
-        };
-        gl.stencilFunc = (func, ref, mask) => {
-            state.stencilFunc = func;
-            state.stencilRef = ref;
-            state.stencilMask = mask;
-            return original.stencilFunc(func, ref, mask);
-        };
-        gl.stencilMask = (mask) => {
-            state.stencilMask = mask;
-            return original.stencilMask(mask);
-        };
-        gl.stencilOp = (fail, zfail, zpass) => {
-            state.stencilFail = fail;
-            state.stencilZFail = zfail;
-            state.stencilZPass = zpass;
-            return original.stencilOp(fail, zfail, zpass);
-        };
-        gl.colorMask = (r, g, b, a) => {
-            state.colorMask = [r, g, b, a];
-            return original.colorMask(r, g, b, a);
-        };
-        gl.clearColor = (r, g, b, a) => {
-            state.clearColor = [r, g, b, a];
-            return original.clearColor(r, g, b, a);
-        };
-        gl.cullFace = (mode) => {
-            state.cullFaceMode = mode;
-            return original.cullFace(mode);
-        };
-        gl.frontFace = (mode) => {
-            state.frontFace = mode;
-            return original.frontFace(mode);
-        };
-        gl.polygonOffset = (factor, units) => {
-            state.polygonOffsetFactor = factor;
-            state.polygonOffsetUnits = units;
-            return original.polygonOffset(factor, units);
-        };
-        gl.pixelStorei = (pname, param) => {
-            state.pixelStorei.set(pname, param);
-            return original.pixelStorei(pname, param);
-        };
-        console.log("[rendera] WebGL state tracker monkeypatch applied successfully");
-        console.log("[rendera] Patched methods:", Object.keys(original));
-        const verification = this.verifyMonkeypatch();
-        const status = verification.success ? "SUCCESS" : "FAILED";
-        console.log(`[rendera] Monkeypatch verification: ${status}`, verification);
-    }
-    /**
-     * Verify that monkeypatch was applied successfully
-     */
-    verifyMonkeypatch() {
-        const patchedMethods = [];
-        const unpatchedMethods = [];
-        for (const [methodName, originalMethod] of Object.entries(this.original)) {
-            if (this.gl[methodName] !== originalMethod) {
-                patchedMethods.push(methodName);
-            }
-            else {
-                unpatchedMethods.push(methodName);
-            }
-        }
-        return {
-            success: unpatchedMethods.length === 0,
-            patchedMethods,
-            unpatchedMethods,
-            totalMethods: Object.keys(this.original).length
-        };
-    }
-    /**
-     * Take a snapshot of the current WebGL state
-     */
-    snapshot() {
-        // Deep copy texture bindings
-        const textureBindingsCopy = new Map();
-        for (const [unit, bindings] of this.state.textureBindings.entries()) {
-            textureBindingsCopy.set(unit, { ...bindings });
-        }
-        return {
-            activeTexture: this.state.activeTexture,
-            textureBindings: textureBindingsCopy,
-            boundFramebuffer: this.state.boundFramebuffer,
-            boundReadFramebuffer: this.state.boundReadFramebuffer,
-            boundDrawFramebuffer: this.state.boundDrawFramebuffer,
-            boundArrayBuffer: this.state.boundArrayBuffer,
-            boundElementArrayBuffer: this.state.boundElementArrayBuffer,
-            boundUniformBuffer: this.state.boundUniformBuffer,
-            boundTransformFeedbackBuffer: this.state.boundTransformFeedbackBuffer,
-            boundVertexArray: this.state.boundVertexArray,
-            currentProgram: this.state.currentProgram,
-            viewport: [...this.state.viewport],
-            scissorBox: [...this.state.scissorBox],
-            capabilities: new Map(this.state.capabilities),
-            blendSrcRGB: this.state.blendSrcRGB,
-            blendDstRGB: this.state.blendDstRGB,
-            blendSrcAlpha: this.state.blendSrcAlpha,
-            blendDstAlpha: this.state.blendDstAlpha,
-            blendEquationRGB: this.state.blendEquationRGB,
-            blendEquationAlpha: this.state.blendEquationAlpha,
-            blendColor: [...this.state.blendColor],
-            depthFunc: this.state.depthFunc,
-            depthMask: this.state.depthMask,
-            depthRange: [...this.state.depthRange],
-            stencilFunc: this.state.stencilFunc,
-            stencilRef: this.state.stencilRef,
-            stencilMask: this.state.stencilMask,
-            stencilFail: this.state.stencilFail,
-            stencilZFail: this.state.stencilZFail,
-            stencilZPass: this.state.stencilZPass,
-            colorMask: [...this.state.colorMask],
-            clearColor: [...this.state.clearColor],
-            cullFaceMode: this.state.cullFaceMode,
-            frontFace: this.state.frontFace,
-            polygonOffsetFactor: this.state.polygonOffsetFactor,
-            polygonOffsetUnits: this.state.polygonOffsetUnits,
-            pixelStorei: new Map(this.state.pixelStorei),
-        };
-    }
-    /**
-     * Restore WebGL state from a snapshot
-     */
-    restore(snapshot) {
-        const gl = this.gl;
-        const original = this.original;
-        // Restore textures
-        original.activeTexture(snapshot.activeTexture);
-        for (const [unit, bindings] of snapshot.textureBindings.entries()) {
-            original.activeTexture(gl.TEXTURE0 + unit);
-            for (const [target, texture] of Object.entries(bindings)) {
-                original.bindTexture(Number(target), texture);
-            }
-        }
-        original.activeTexture(snapshot.activeTexture);
-        // Restore framebuffers
-        original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer);
-        if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
-            original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer);
-        }
-        if (snapshot.boundDrawFramebuffer !== snapshot.boundFramebuffer) {
-            original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer);
-        }
-        // Restore buffers
-        original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer);
-        original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer);
-        if (snapshot.boundUniformBuffer !== undefined) {
-            original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
-        }
-        if (snapshot.boundTransformFeedbackBuffer !== undefined) {
-            original.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, snapshot.boundTransformFeedbackBuffer);
-        }
-        // Restore VAO
-        original.bindVertexArray(snapshot.boundVertexArray);
-        // Restore program
-        original.useProgram(snapshot.currentProgram);
-        // Restore viewport and scissor
-        original.viewport(...snapshot.viewport);
-        original.scissor(...snapshot.scissorBox);
-        // Restore capabilities
-        for (const [cap, enabled] of snapshot.capabilities.entries()) {
-            if (enabled) {
-                original.enable(cap);
-            }
-            else {
-                original.disable(cap);
-            }
-        }
-        // Restore blend state
-        original.blendFuncSeparate(snapshot.blendSrcRGB, snapshot.blendDstRGB, snapshot.blendSrcAlpha, snapshot.blendDstAlpha);
-        original.blendEquationSeparate(snapshot.blendEquationRGB, snapshot.blendEquationAlpha);
-        original.blendColor(...snapshot.blendColor);
-        // Restore depth state
-        original.depthFunc(snapshot.depthFunc);
-        original.depthMask(snapshot.depthMask);
-        original.depthRange(...snapshot.depthRange);
-        // Restore stencil state
-        original.stencilFunc(snapshot.stencilFunc, snapshot.stencilRef, snapshot.stencilMask);
-        original.stencilOp(snapshot.stencilFail, snapshot.stencilZFail, snapshot.stencilZPass);
-        // Restore color state
-        original.colorMask(...snapshot.colorMask);
-        original.clearColor(...snapshot.clearColor);
-        // Restore culling
-        original.cullFace(snapshot.cullFaceMode);
-        original.frontFace(snapshot.frontFace);
-        // Restore polygon offset
-        original.polygonOffset(snapshot.polygonOffsetFactor, snapshot.polygonOffsetUnits);
-        // Restore pixel store parameters
-        if (snapshot.pixelStorei) {
-            for (const [pname, value] of snapshot.pixelStorei.entries()) {
-                original.pixelStorei(pname, value);
-            }
-        }
-        // Update internal state
-        this.state = this.snapshot(); // Re-snapshot to update internal state
-    }
-    /**
-     * Get the current state
-     */
-    getState() {
-        return this.state;
-    }
-    /**
-     * Get original WebGL methods
-     */
-    getOriginalMethods() {
-        return this.original;
-    }
-    /**
-     * Convert snapshot to loggable format
-     */
-    snapshotToLoggable(snapshot) {
-        const result = { ...snapshot };
-        // Convert Maps to objects for better console logging
-        if (result.textureBindings instanceof Map) {
-            result.textureBindings = Object.fromEntries(result.textureBindings);
-        }
-        if (result.capabilities instanceof Map) {
-            result.capabilities = Object.fromEntries(result.capabilities);
-        }
-        if (result.pixelStorei instanceof Map) {
-            result.pixelStorei = Object.fromEntries(result.pixelStorei);
-        }
-        return result;
-    }
-}
-WebGLStateTracker.instance = null;
 
 export { AnimationWorkerManager, GPUResourceCache, GPUResourceManager, InstanceManager, ModelLoader, ShaderUniformCache, WebGLStateTracker };

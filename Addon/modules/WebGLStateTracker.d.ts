@@ -11,6 +11,7 @@ export interface WebGLState {
     boundElementArrayBuffer: WebGLBuffer | null;
     boundUniformBuffer: WebGLBuffer | null;
     boundTransformFeedbackBuffer: WebGLBuffer | null;
+    uniformBufferBindings: Map<number, WebGLBuffer | null>;
     boundVertexArray: WebGLVertexArrayObject | null;
     currentProgram: WebGLProgram | null;
     viewport: number[];
