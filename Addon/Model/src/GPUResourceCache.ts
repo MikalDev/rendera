@@ -1,8 +1,13 @@
 import { IGPUResourceCache } from './types';
+import { WebGLStateTracker, WebGLState } from './WebGLStateTracker';
 
 export class GPUResourceCache implements IGPUResourceCache {
     private gl: WebGL2RenderingContext;
 
+    // New: Using WebGLState snapshot instead of manual state tracking
+    private cachedModelState: WebGLState | null = null;
+
+    // Old implementation kept for reference/comparison
     private cachedState: {
         // Original 4 states
         vao: WebGLVertexArrayObject | null;
@@ -38,32 +43,42 @@ export class GPUResourceCache implements IGPUResourceCache {
     }
 
     cacheModelMode() {
-        // console.log('[rendera] GPUResourceCache: cacheModelMode');
+        // New implementation using WebGLStateTracker
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker) {
+            this.cachedModelState = tracker.snapshot();
+            return;
+        }
+
+        // Fallback to old implementation if tracker not available
+        // console.log('[rendera] GPUResourceCache: cacheModelMode (fallback)');
+
+        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
         // Get currently bound VAO
         const vao = this.gl.getParameter(this.gl.VERTEX_ARRAY_BINDING);
-        
+
         // Get currently bound texture
         const textureBinding = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
-        
+
         // Get current shader program
         const shaderProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
 
         // Get current element array buffer
         const elementArrayBuffer = this.gl.getParameter(this.gl.ELEMENT_ARRAY_BUFFER_BINDING);
-        
+
         // Get active texture unit
         const activeTexture = this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
-        
+
         // Get array buffer binding
         const arrayBuffer = this.gl.getParameter(this.gl.ARRAY_BUFFER_BINDING);
-        
+
         // Get uniform buffer bindings for tracked binding points
         const uniformBufferBindings: (WebGLBuffer | null)[] = [];
         for (const bindingPoint of GPUResourceCache.TRACKED_UBO_BINDING_POINTS) {
             const buffer = this.gl.getIndexedParameter(this.gl.UNIFORM_BUFFER_BINDING, bindingPoint);
             uniformBufferBindings.push(buffer);
         }
-        
+
         this.cachedState = {
             vao,
             textureBinding,
@@ -74,29 +89,47 @@ export class GPUResourceCache implements IGPUResourceCache {
             uniformBufferBindings
         };
         //console.log('[rendera] GPUResourceCache: cachedState', this.cachedState);
+        */
     }
 
     restoreModelMode() {
-        // console.log('[rendera] GPUResourceCache: restoreModelMode');
+        // New implementation using WebGLStateTracker
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker && this.cachedModelState) {
+            // Clean up texture units before restoring (same as old implementation)
+            this.cleanupTextureUnits();
+
+            // Restore the complete WebGL state
+            tracker.restore(this.cachedModelState);
+
+            // Clear cached state after restoration
+            this.cachedModelState = null;
+            return;
+        }
+
+        // Fallback to old implementation if tracker not available
+        // console.log('[rendera] GPUResourceCache: restoreModelMode (fallback)');
+
+        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
         if (this.cachedState) {
             // console.log('[rendera] GPUResourceCache: restoreModelMode', this.cachedState);
-            
+
             // First, clean up any texture bindings we might have created on units 1-17
             // This ensures C3 doesn't encounter unexpected textures
             this.cleanupTextureUnits();
-            
+
             // Restore active texture unit first (before binding textures)
             this.gl.activeTexture(this.cachedState.activeTexture);
-            
+
             // Restore original 4 states
             this.gl.bindVertexArray(this.cachedState.vao);
             this.gl.bindTexture(this.gl.TEXTURE_2D, this.cachedState.textureBinding);
             this.gl.useProgram(this.cachedState.shaderProgram);
             this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.cachedState.elementArrayBuffer);
-            
+
             // Restore additional states
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.cachedState.arrayBuffer);
-            
+
             // Restore uniform buffer bindings
             for (let i = 0; i < this.cachedState.uniformBufferBindings.length; i++) {
                 const bindingPoint = GPUResourceCache.TRACKED_UBO_BINDING_POINTS[i];
@@ -105,10 +138,11 @@ export class GPUResourceCache implements IGPUResourceCache {
                     this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, bindingPoint, buffer);
                 }
             }
-            
+
             // Clear cached state after restoration
             this.cachedState = null;
         }
+        */
     }
 
     /**
@@ -116,8 +150,10 @@ export class GPUResourceCache implements IGPUResourceCache {
      * We skip unit 0 as it will be restored from cached state
      */
     private cleanupTextureUnits(): void {
-        // Use cached activeTexture if available, otherwise query GL
-        const currentActiveTexture = this.cachedState?.activeTexture ?? this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+        // Use cached activeTexture from new state, fallback to old state, or query GL
+        const currentActiveTexture = this.cachedModelState?.activeTexture ??
+                                    this.cachedState?.activeTexture ??
+                                    this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
         
         // Clean material texture units (1-4)
         for (let unit = 1; unit <= 4; unit++) {

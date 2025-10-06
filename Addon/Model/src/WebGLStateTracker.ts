@@ -18,6 +18,9 @@ export interface WebGLState {
     boundUniformBuffer: WebGLBuffer | null;
     boundTransformFeedbackBuffer: WebGLBuffer | null;
 
+    // Uniform buffer base bindings (indexed bindings)
+    uniformBufferBindings: Map<number, WebGLBuffer | null>;
+
     // VAO state
     boundVertexArray: WebGLVertexArrayObject | null;
 
@@ -89,6 +92,7 @@ export class WebGLStateTracker {
             boundElementArrayBuffer: null,
             boundUniformBuffer: null,
             boundTransformFeedbackBuffer: null,
+            uniformBufferBindings: new Map(),
             boundVertexArray: null,
             currentProgram: null,
             viewport: [0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight],
@@ -140,6 +144,7 @@ export class WebGLStateTracker {
             bindTexture: gl.bindTexture.bind(gl),
             bindFramebuffer: gl.bindFramebuffer.bind(gl),
             bindBuffer: gl.bindBuffer.bind(gl),
+            bindBufferBase: gl.bindBufferBase.bind(gl),
             bindVertexArray: gl.bindVertexArray.bind(gl),
             useProgram: gl.useProgram.bind(gl),
             viewport: gl.viewport.bind(gl),
@@ -232,6 +237,13 @@ export class WebGLStateTracker {
                 state.boundTransformFeedbackBuffer = buffer;
             }
             return original.bindBuffer(target, buffer);
+        };
+
+        (gl as any).bindBufferBase = (target: number, index: number, buffer: WebGLBuffer | null) => {
+            if (target === gl.UNIFORM_BUFFER) {
+                state.uniformBufferBindings.set(index, buffer);
+            }
+            return original.bindBufferBase(target, index, buffer);
         };
 
         (gl as any).bindVertexArray = (vao: WebGLVertexArrayObject | null) => {
@@ -413,6 +425,7 @@ export class WebGLStateTracker {
             boundElementArrayBuffer: this.state.boundElementArrayBuffer,
             boundUniformBuffer: this.state.boundUniformBuffer,
             boundTransformFeedbackBuffer: this.state.boundTransformFeedbackBuffer,
+            uniformBufferBindings: new Map(this.state.uniformBufferBindings),
             boundVertexArray: this.state.boundVertexArray,
             currentProgram: this.state.currentProgram,
             viewport: [...this.state.viewport],
@@ -470,7 +483,12 @@ export class WebGLStateTracker {
             original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer);
         }
 
-        // Restore buffers
+        // IMPORTANT: Restore VAO first, before element array buffer
+        // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
+        // so we must restore the VAO before restoring the element buffer
+        original.bindVertexArray(snapshot.boundVertexArray);
+
+        // Now restore buffers (including element array buffer)
         original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer);
         original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer);
         if (snapshot.boundUniformBuffer !== undefined) {
@@ -480,8 +498,12 @@ export class WebGLStateTracker {
             original.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, snapshot.boundTransformFeedbackBuffer);
         }
 
-        // Restore VAO
-        original.bindVertexArray(snapshot.boundVertexArray);
+        // Restore uniform buffer base bindings
+        if (snapshot.uniformBufferBindings) {
+            for (const [index, buffer] of snapshot.uniformBufferBindings.entries()) {
+                original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
+            }
+        }
 
         // Restore program
         original.useProgram(snapshot.currentProgram);
