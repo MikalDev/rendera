@@ -407,45 +407,29 @@ export class WebGLStateTracker {
 
     /**
      * Take a snapshot of the current WebGL state
-     * Queries fresh state from GL to avoid stale references to deleted objects
      */
     public snapshot(): WebGLState {
-        const gl = this.gl;
-
-        // Query fresh state from WebGL to avoid stale references
-        // This is critical for objects that may be deleted (framebuffers, textures, etc.)
-        const freshState = {
-            activeTexture: gl.getParameter(gl.ACTIVE_TEXTURE),
-            boundFramebuffer: gl.getParameter(gl.FRAMEBUFFER_BINDING),
-            boundArrayBuffer: gl.getParameter(gl.ARRAY_BUFFER_BINDING),
-            boundElementArrayBuffer: gl.getParameter(gl.ELEMENT_ARRAY_BUFFER_BINDING),
-            boundVertexArray: gl.getParameter(gl.VERTEX_ARRAY_BINDING),
-            currentProgram: gl.getParameter(gl.CURRENT_PROGRAM),
-            viewport: gl.getParameter(gl.VIEWPORT),
-            scissorBox: gl.getParameter(gl.SCISSOR_BOX),
-        };
-
-        // Deep copy texture bindings from tracked state (these should be accurate)
+        // Deep copy texture bindings
         const textureBindingsCopy = new Map<number, Record<number, WebGLTexture | null>>();
         for (const [unit, bindings] of this.state.textureBindings.entries()) {
             textureBindingsCopy.set(unit, { ...bindings });
         }
 
         return {
-            activeTexture: freshState.activeTexture,
+            activeTexture: this.state.activeTexture,
             textureBindings: textureBindingsCopy,
-            boundFramebuffer: freshState.boundFramebuffer,
-            boundReadFramebuffer: freshState.boundFramebuffer, // Use same as FRAMEBUFFER
-            boundDrawFramebuffer: freshState.boundFramebuffer, // Use same as FRAMEBUFFER
-            boundArrayBuffer: freshState.boundArrayBuffer,
-            boundElementArrayBuffer: freshState.boundElementArrayBuffer,
-            boundUniformBuffer: gl.getParameter(gl.UNIFORM_BUFFER_BINDING) ?? null,
-            boundTransformFeedbackBuffer: gl.getParameter(gl.TRANSFORM_FEEDBACK_BUFFER_BINDING) ?? null,
-            uniformBufferBindings: new Map(this.state.uniformBufferBindings), // Keep tracked state for indexed bindings
-            boundVertexArray: freshState.boundVertexArray,
-            currentProgram: freshState.currentProgram,
-            viewport: [...freshState.viewport],
-            scissorBox: [...freshState.scissorBox],
+            boundFramebuffer: this.state.boundFramebuffer,
+            boundReadFramebuffer: this.state.boundReadFramebuffer,
+            boundDrawFramebuffer: this.state.boundDrawFramebuffer,
+            boundArrayBuffer: this.state.boundArrayBuffer,
+            boundElementArrayBuffer: this.state.boundElementArrayBuffer,
+            boundUniformBuffer: this.state.boundUniformBuffer,
+            boundTransformFeedbackBuffer: this.state.boundTransformFeedbackBuffer,
+            uniformBufferBindings: new Map(this.state.uniformBufferBindings),
+            boundVertexArray: this.state.boundVertexArray,
+            currentProgram: this.state.currentProgram,
+            viewport: [...this.state.viewport],
+            scissorBox: [...this.state.scissorBox],
             capabilities: new Map(this.state.capabilities),
             blendSrcRGB: this.state.blendSrcRGB,
             blendDstRGB: this.state.blendDstRGB,
@@ -485,42 +469,68 @@ export class WebGLStateTracker {
         for (const [unit, bindings] of snapshot.textureBindings.entries()) {
             original.activeTexture(gl.TEXTURE0 + unit);
             for (const [target, texture] of Object.entries(bindings)) {
-                original.bindTexture(Number(target), texture);
+                // Validate texture before binding
+                if (texture && gl.isTexture(texture)) {
+                    original.bindTexture(Number(target), texture);
+                } else {
+                    original.bindTexture(Number(target), null);
+                }
             }
         }
         original.activeTexture(snapshot.activeTexture);
 
         // Restore framebuffers with validation
-        try {
+        // Check if framebuffer is still valid before restoring
+        if (snapshot.boundFramebuffer && gl.isFramebuffer(snapshot.boundFramebuffer)) {
             original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer);
-            if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
-                original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer);
-            }
-            if (snapshot.boundDrawFramebuffer !== snapshot.boundFramebuffer) {
-                original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer);
-            }
-        } catch (e) {
-            // If framebuffer was deleted, bind to default framebuffer
-            console.warn('[rendera] WebGLStateTracker: Failed to restore framebuffer (likely deleted), binding to default', e);
+        } else if (snapshot.boundFramebuffer !== null) {
+            // Framebuffer was deleted, bind to default
+            console.warn('[rendera] WebGLStateTracker: Framebuffer was deleted, binding to default');
             original.bindFramebuffer(gl.FRAMEBUFFER, null);
+        } else {
+            // Was already null, restore as null
+            original.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+
+        if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
+            if (snapshot.boundReadFramebuffer && gl.isFramebuffer(snapshot.boundReadFramebuffer)) {
+                original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer);
+            } else {
+                original.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+            }
+        }
+
+        if (snapshot.boundDrawFramebuffer !== snapshot.boundFramebuffer) {
+            if (snapshot.boundDrawFramebuffer && gl.isFramebuffer(snapshot.boundDrawFramebuffer)) {
+                original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer);
+            } else {
+                original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+            }
         }
 
         // IMPORTANT: Restore VAO first, before element array buffer
         // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
         // so we must restore the VAO before restoring the element buffer
-        try {
+        if (snapshot.boundVertexArray && gl.isVertexArray(snapshot.boundVertexArray)) {
             original.bindVertexArray(snapshot.boundVertexArray);
-        } catch (e) {
-            console.warn('[rendera] WebGLStateTracker: Failed to restore VAO (likely deleted), binding null', e);
+        } else if (snapshot.boundVertexArray !== null) {
+            console.warn('[rendera] WebGLStateTracker: VAO was deleted, binding null');
+            original.bindVertexArray(null);
+        } else {
             original.bindVertexArray(null);
         }
 
         // Now restore buffers (including element array buffer)
-        try {
+        if (snapshot.boundArrayBuffer && gl.isBuffer(snapshot.boundArrayBuffer)) {
             original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer);
+        } else {
+            original.bindBuffer(gl.ARRAY_BUFFER, null);
+        }
+
+        if (snapshot.boundElementArrayBuffer && gl.isBuffer(snapshot.boundElementArrayBuffer)) {
             original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer);
-        } catch (e) {
-            console.warn('[rendera] WebGLStateTracker: Failed to restore buffer (likely deleted)', e);
+        } else {
+            original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
         }
         if (snapshot.boundUniformBuffer !== undefined) {
             original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
@@ -537,10 +547,12 @@ export class WebGLStateTracker {
         }
 
         // Restore program
-        try {
+        if (snapshot.currentProgram && gl.isProgram(snapshot.currentProgram)) {
             original.useProgram(snapshot.currentProgram);
-        } catch (e) {
-            console.warn('[rendera] WebGLStateTracker: Failed to restore program (likely deleted)', e);
+        } else if (snapshot.currentProgram !== null) {
+            console.warn('[rendera] WebGLStateTracker: Program was deleted, using null');
+            original.useProgram(null);
+        } else {
             original.useProgram(null);
         }
 
