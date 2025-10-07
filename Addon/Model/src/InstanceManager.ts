@@ -228,7 +228,8 @@ export class InstanceManager implements IInstanceManager {
 
         if (this.shadowMapManager) {
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
-            this.shadowMapManager.renderAllShadowMaps(this);
+            // Pass lights array for optimized early exit when no shadows are cast
+            this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
         }
 
         // Set multiple shadow map uniforms using new multi-shadow system

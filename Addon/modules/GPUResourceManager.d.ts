@@ -5,6 +5,7 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     private gl;
     private shaderSystem;
     gpuResourceCache: IGPUResourceCache;
+    private uniformCache;
     private static DEBUG_SHADOWS;
     private buffers;
     private textures;

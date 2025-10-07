@@ -13798,6 +13798,84 @@ else if (typeof define === 'function' && define['amd'])
 else if (typeof exports === 'object')
   exports["DracoDecoderModule"] = DracoDecoderModule;
 
+/**
+ * Manages uniform location caching for WebGL shader programs.
+ * Automatically caches uniform locations on first access and provides
+ * invalidation mechanisms for shader recompilation.
+ *
+ * This class follows SOLID principles and reduces repeated GL calls
+ * by caching uniform locations per shader program.
+ */
+class ShaderUniformCache {
+    constructor(gl) {
+        this.gl = gl;
+        this.cache = new Map();
+    }
+    /**
+     * Gets a uniform location, using cache if available.
+     * @param program - The shader program
+     * @param uniformName - Name of the uniform
+     * @returns The uniform location or null if not found
+     */
+    getLocation(program, uniformName) {
+        // Get or create program cache
+        if (!this.cache.has(program)) {
+            this.cache.set(program, new Map());
+        }
+        const programCache = this.cache.get(program);
+        // Get or query uniform location
+        if (!programCache.has(uniformName)) {
+            const location = this.gl.getUniformLocation(program, uniformName);
+            programCache.set(uniformName, location);
+        }
+        return programCache.get(uniformName);
+    }
+    /**
+     * Gets multiple uniform locations at once.
+     * Useful for initializing a set of commonly used uniforms.
+     * @param program - The shader program
+     * @param uniformNames - Array of uniform names
+     * @returns Map of uniform names to locations
+     */
+    getLocations(program, uniformNames) {
+        const locations = new Map();
+        for (const name of uniformNames) {
+            locations.set(name, this.getLocation(program, name));
+        }
+        return locations;
+    }
+    /**
+     * Invalidates cache for a specific program.
+     * Call this when a shader is recompiled or deleted.
+     * @param program - The shader program to invalidate
+     */
+    invalidateProgram(program) {
+        this.cache.delete(program);
+    }
+    /**
+     * Clears the entire cache.
+     * Call this on context loss or reset.
+     */
+    clear() {
+        this.cache.clear();
+    }
+    /**
+     * Gets the number of cached programs.
+     * Useful for debugging and monitoring.
+     */
+    getCachedProgramCount() {
+        return this.cache.size;
+    }
+    /**
+     * Gets the number of cached uniforms for a program.
+     * @param program - The shader program
+     */
+    getCachedUniformCount(program) {
+        var _a, _b;
+        return (_b = (_a = this.cache.get(program)) === null || _a === void 0 ? void 0 : _a.size) !== null && _b !== void 0 ? _b : 0;
+    }
+}
+
 // MaterialSystem for handling materials and shaders
 class MaterialSystem {
     constructor(gl, samplerTextureUnitMap) {
@@ -13807,6 +13885,7 @@ class MaterialSystem {
         this.gl = gl;
         this.materials = new Map();
         this.samplerTextureUnitMap = samplerTextureUnitMap;
+        this.uniformCache = new ShaderUniformCache(gl);
         this.createDefaultTextures();
     }
     createDefaultTextures() {
@@ -13865,7 +13944,7 @@ class MaterialSystem {
         // Bind all samplers - either from material or use defaults
         // This prevents texture state from leaking between materials
         for (const [samplerName, textureUnit] of Object.entries(this.samplerTextureUnitMap)) {
-            const location = this.gl.getUniformLocation(shader, samplerName);
+            const location = this.uniformCache.getLocation(shader, samplerName);
             if (location === null)
                 continue;
             this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
@@ -13884,7 +13963,7 @@ class MaterialSystem {
         // Set material uniforms
         if (material.uniforms) {
             for (const [name, value] of Object.entries(material.uniforms)) {
-                const location = this.gl.getUniformLocation(shader, name);
+                const location = this.uniformCache.getLocation(shader, name);
                 if (location === null)
                     continue;
                 // Handle different uniform types
@@ -14778,81 +14857,37 @@ class WebGLStateTracker {
     }
     /**
      * Restore WebGL state from a snapshot
+     * @param snapshot The state snapshot to restore
      */
     restore(snapshot) {
         const gl = this.gl;
         const original = this.original;
-        // Restore textures
+        // Restore textures without validation - trust that textures are valid
         original.activeTexture(snapshot.activeTexture);
         for (const [unit, bindings] of snapshot.textureBindings.entries()) {
             original.activeTexture(gl.TEXTURE0 + unit);
             for (const [target, texture] of Object.entries(bindings)) {
-                // Validate texture before binding
-                if (texture && gl.isTexture(texture)) {
-                    original.bindTexture(Number(target), texture);
-                }
-                else {
-                    original.bindTexture(Number(target), null);
-                }
+                original.bindTexture(Number(target), texture || null);
             }
         }
         original.activeTexture(snapshot.activeTexture);
-        // Restore framebuffers with validation
-        // Check if framebuffer is still valid before restoring
-        if (snapshot.boundFramebuffer && gl.isFramebuffer(snapshot.boundFramebuffer)) {
-            original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer);
-        }
-        else if (snapshot.boundFramebuffer !== null) {
-            // Framebuffer was deleted, bind to default
-            console.warn('[rendera] WebGLStateTracker: Framebuffer was deleted, binding to default');
-            original.bindFramebuffer(gl.FRAMEBUFFER, null);
-        }
-        else {
-            // Was already null, restore as null
-            original.bindFramebuffer(gl.FRAMEBUFFER, null);
-        }
+        // Restore framebuffers without validation - trust that framebuffers are valid
+        original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
         if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
-            if (snapshot.boundReadFramebuffer && gl.isFramebuffer(snapshot.boundReadFramebuffer)) {
-                original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer);
-            }
-            else {
-                original.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-            }
+            original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer || null);
         }
         if (snapshot.boundDrawFramebuffer !== snapshot.boundFramebuffer) {
-            if (snapshot.boundDrawFramebuffer && gl.isFramebuffer(snapshot.boundDrawFramebuffer)) {
-                original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer);
-            }
-            else {
-                original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-            }
+            original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer || null);
         }
         // IMPORTANT: Restore VAO first, before element array buffer
         // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
         // so we must restore the VAO before restoring the element buffer
-        if (snapshot.boundVertexArray && gl.isVertexArray(snapshot.boundVertexArray)) {
-            original.bindVertexArray(snapshot.boundVertexArray);
-        }
-        else if (snapshot.boundVertexArray !== null) {
-            console.warn('[rendera] WebGLStateTracker: VAO was deleted, binding null');
-            original.bindVertexArray(null);
-        }
-        else {
-            original.bindVertexArray(null);
-        }
-        // Now restore buffers (including element array buffer)
-        if (snapshot.boundArrayBuffer && gl.isBuffer(snapshot.boundArrayBuffer)) {
-            original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer);
-        }
-        else {
-            original.bindBuffer(gl.ARRAY_BUFFER, null);
-        }
-        if (snapshot.boundElementArrayBuffer && gl.isBuffer(snapshot.boundElementArrayBuffer)) {
-            original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer);
-        }
-        else {
-            original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-        }
+        // Restore without validation - trust that VAOs are valid
+        original.bindVertexArray(snapshot.boundVertexArray || null);
+        // Restore buffers without validation - trust that buffers are valid
+        // This avoids expensive gl.isBuffer calls
+        original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer || null);
+        original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer || null);
         if (snapshot.boundUniformBuffer !== undefined) {
             original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
         }
@@ -14865,17 +14900,8 @@ class WebGLStateTracker {
                 original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
             }
         }
-        // Restore program
-        if (snapshot.currentProgram && gl.isProgram(snapshot.currentProgram)) {
-            original.useProgram(snapshot.currentProgram);
-        }
-        else if (snapshot.currentProgram !== null) {
-            console.warn('[rendera] WebGLStateTracker: Program was deleted, using null');
-            original.useProgram(null);
-        }
-        else {
-            original.useProgram(null);
-        }
+        // Restore program without validation - trust that programs are valid
+        original.useProgram(snapshot.currentProgram || null);
         // Restore viewport and scissor
         original.viewport(...snapshot.viewport);
         original.scissor(...snapshot.scissorBox);
@@ -15175,6 +15201,7 @@ class GPUResourceManager {
         this.BONE_UBO_BINDING_POINT = 0;
         this.gl = gl;
         this.shaderSystem = new ShaderSystem(gl);
+        this.uniformCache = new ShaderUniformCache(gl);
         // Initialize lights array with default values
         this.lights = Array(this.MAX_LIGHTS).fill(null).map(() => ({
             type: 'point',
@@ -15298,13 +15325,13 @@ class GPUResourceManager {
         return shader;
     }
     setNormalMapEnabled(shader, enabled) {
-        const location = this.gl.getUniformLocation(shader, 'u_UseNormalMap');
+        const location = this.uniformCache.getLocation(shader, 'u_UseNormalMap');
         if (location) {
             this.gl.uniform1i(location, enabled ? 1 : 0);
         }
     }
     setLightPosition(shader, lightPosition) {
-        const location = this.gl.getUniformLocation(shader, 'u_LightPosition');
+        const location = this.uniformCache.getLocation(shader, 'u_LightPosition');
         if (location) {
             this.gl.uniform3fv(location, lightPosition);
         }
@@ -15786,16 +15813,18 @@ class GPUResourceManager {
     }
     updateCameraPositionUniforms(shader) {
         if (this.dirtyCameraPosition) {
-            this.gl.uniform3fv(this.gl.getUniformLocation(shader, 'u_CameraPosition'), this.cameraPosition);
+            const location = this.uniformCache.getLocation(shader, 'u_CameraPosition');
+            if (location)
+                this.gl.uniform3fv(location, this.cameraPosition);
             this.dirtyCameraPosition = false;
         }
     }
     updateGIUniforms(shader) {
         if (this.dirtyGIState) {
-            const skyLoc = this.gl.getUniformLocation(shader, 'u_SkyColor');
-            const groundLoc = this.gl.getUniformLocation(shader, 'u_GroundColor');
-            const intensityLoc = this.gl.getUniformLocation(shader, 'u_GIIntensity');
-            const wrapLoc = this.gl.getUniformLocation(shader, 'u_LambertWrap');
+            const skyLoc = this.uniformCache.getLocation(shader, 'u_SkyColor');
+            const groundLoc = this.uniformCache.getLocation(shader, 'u_GroundColor');
+            const intensityLoc = this.uniformCache.getLocation(shader, 'u_GIIntensity');
+            const wrapLoc = this.uniformCache.getLocation(shader, 'u_LambertWrap');
             if (skyLoc)
                 this.gl.uniform3fv(skyLoc, this.giState.skyColor);
             if (groundLoc)
@@ -15824,28 +15853,46 @@ class GPUResourceManager {
         for (let i = 0; i < this.MAX_LIGHTS; i++) {
             const light = this.lights[i];
             const prefix = `u_Lights[${i}]`;
-            this.gl.uniform1i(this.gl.getUniformLocation(shader, `${prefix}.enabled`), light.enabled ? 1 : 0);
-            this.gl.uniform1i(this.gl.getUniformLocation(shader, `${prefix}.type`), this.getLightTypeValue(light.type));
-            this.gl.uniform3fv(this.gl.getUniformLocation(shader, `${prefix}.color`), light.color);
-            this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.intensity`), light.intensity);
+            const enabledLoc = this.uniformCache.getLocation(shader, `${prefix}.enabled`);
+            if (enabledLoc)
+                this.gl.uniform1i(enabledLoc, light.enabled ? 1 : 0);
+            const typeLoc = this.uniformCache.getLocation(shader, `${prefix}.type`);
+            if (typeLoc)
+                this.gl.uniform1i(typeLoc, this.getLightTypeValue(light.type));
+            const colorLoc = this.uniformCache.getLocation(shader, `${prefix}.color`);
+            if (colorLoc)
+                this.gl.uniform3fv(colorLoc, light.color);
+            const intensityLoc = this.uniformCache.getLocation(shader, `${prefix}.intensity`);
+            if (intensityLoc)
+                this.gl.uniform1f(intensityLoc, light.intensity);
             if ('position' in light) {
-                this.gl.uniform3fv(this.gl.getUniformLocation(shader, `${prefix}.position`), light.position);
+                const posLoc = this.uniformCache.getLocation(shader, `${prefix}.position`);
+                if (posLoc)
+                    this.gl.uniform3fv(posLoc, light.position);
             }
             if ('direction' in light) {
-                this.gl.uniform3fv(this.gl.getUniformLocation(shader, `${prefix}.direction`), light.direction);
+                const dirLoc = this.uniformCache.getLocation(shader, `${prefix}.direction`);
+                if (dirLoc)
+                    this.gl.uniform3fv(dirLoc, light.direction);
             }
             if ('attenuation' in light) {
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.attenuation`), light.attenuation);
+                const attenLoc = this.uniformCache.getLocation(shader, `${prefix}.attenuation`);
+                if (attenLoc)
+                    this.gl.uniform1f(attenLoc, light.attenuation);
             }
             if ('cosAngle' in light) {
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.cosAngle`), light.cosAngle);
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotPenumbra`), light.spotPenumbra);
+                const angleLoc = this.uniformCache.getLocation(shader, `${prefix}.cosAngle`);
+                if (angleLoc)
+                    this.gl.uniform1f(angleLoc, light.cosAngle);
+                const penumbraLoc = this.uniformCache.getLocation(shader, `${prefix}.spotPenumbra`);
+                if (penumbraLoc)
+                    this.gl.uniform1f(penumbraLoc, light.spotPenumbra);
             }
         }
     }
     updateLightEnableStates(shader) {
         for (const index of this.dirtyLightStates) {
-            const location = this.gl.getUniformLocation(shader, `u_Lights[${index}].enabled`);
+            const location = this.uniformCache.getLocation(shader, `u_Lights[${index}].enabled`);
             if (location) {
                 this.gl.uniform1i(location, this.lights[index].enabled ? 1 : 0);
             }
@@ -15916,7 +15963,7 @@ class GPUResourceManager {
      */
     setShadowMapUniforms(shader, enabled, shadowMap = null, lightViewProjection = null, bias = 0.001) {
         this.gl.useProgram(shader);
-        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        const useShadowMapLoc = this.uniformCache.getLocation(shader, 'u_UseShadowMap');
         if (useShadowMapLoc) {
             this.gl.uniform1i(useShadowMapLoc, enabled ? 1 : 0);
         }
@@ -15929,15 +15976,15 @@ class GPUResourceManager {
             this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
             this.gl.bindTexture(this.gl.TEXTURE_3D, null);
             this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
-            const shadowMapLoc = this.gl.getUniformLocation(shader, 'u_ShadowMap');
+            const shadowMapLoc = this.uniformCache.getLocation(shader, 'u_ShadowMap');
             if (shadowMapLoc) {
                 this.gl.uniform1i(shadowMapLoc, 10); // Tell shader to use texture unit 10
             }
-            const lightVPLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjection');
+            const lightVPLoc = this.uniformCache.getLocation(shader, 'u_LightViewProjection');
             if (lightVPLoc) {
                 this.gl.uniformMatrix4fv(lightVPLoc, false, lightViewProjection);
             }
-            const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+            const biasLoc = this.uniformCache.getLocation(shader, 'u_ShadowBias');
             if (biasLoc) {
                 this.gl.uniform1f(biasLoc, bias);
             }
@@ -15956,13 +16003,13 @@ class GPUResourceManager {
             console.log(`[GPUResourceManager] Setting up shadow uniforms - Active shadow maps: [${activeShadowMapIndices.join(', ')}], Light mappings:`, Array.from(lightToShadowMapping.entries()));
         }
         // Set global shadow map enabled flag
-        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        const useShadowMapLoc = this.uniformCache.getLocation(shader, 'u_UseShadowMap');
         const shadowsEnabled = activeShadowMapIndices.length > 0;
         if (useShadowMapLoc) {
             this.gl.uniform1i(useShadowMapLoc, shadowsEnabled ? 1 : 0);
         }
         // Set shadow bias
-        const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+        const biasLoc = this.uniformCache.getLocation(shader, 'u_ShadowBias');
         if (biasLoc) {
             this.gl.uniform1f(biasLoc, bias);
         }
@@ -16013,11 +16060,11 @@ class GPUResourceManager {
             }
         }
         // Set uniform arrays
-        const shadowEnabledLoc = this.gl.getUniformLocation(shader, 'u_ShadowEnabled');
+        const shadowEnabledLoc = this.uniformCache.getLocation(shader, 'u_ShadowEnabled');
         if (shadowEnabledLoc) {
             this.gl.uniform1iv(shadowEnabledLoc, shadowEnabledArray);
         }
-        const lightToShadowMapLoc = this.gl.getUniformLocation(shader, 'u_LightToShadowMap');
+        const lightToShadowMapLoc = this.uniformCache.getLocation(shader, 'u_LightToShadowMap');
         if (lightToShadowMapLoc) {
             this.gl.uniform1iv(lightToShadowMapLoc, lightToShadowArray);
         }
@@ -16025,13 +16072,13 @@ class GPUResourceManager {
         // Each uniform points to the corresponding texture unit (10+i)
         for (let i = 0; i < 8; i++) {
             const uniformName = `u_ShadowMap${i}`;
-            const location = this.gl.getUniformLocation(shader, uniformName);
+            const location = this.uniformCache.getLocation(shader, uniformName);
             if (location !== null) {
                 this.gl.uniform1i(location, 10 + i);
             }
         }
         // Set light view-projection matrices array
-        const lightViewProjectionsLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjections');
+        const lightViewProjectionsLoc = this.uniformCache.getLocation(shader, 'u_LightViewProjections');
         if (lightViewProjectionsLoc) {
             // Create a flat array of all matrices (8 matrices * 16 floats each)
             const allMatrices = new Float32Array(8 * 16);
@@ -17960,16 +18007,22 @@ class ShadowMapManager {
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
+     * @param lights - Optional array of lights to check for shadow casting (for early exit optimization)
      */
-    renderAllShadowMaps(instanceManager) {
-        // Early exit if no shadow maps to render
+    renderAllShadowMaps(instanceManager, lights) {
+        // Ultra-fast early exit: if lights array is provided, check if ANY light casts shadows
+        // This avoids even checking the shadowMaps collection if no lights will cast shadows
+        if (lights && !this.hasAnyShadowCastingLights(lights)) {
+            return; // No lights cast shadows - skip EVERYTHING including state checks
+        }
+        // Early exit if no shadow maps have been created
         if (this.shadowMaps.size === 0) {
             return; // Skip entire shadow map stage including state store/restore
         }
         // Check if any enabled lights need rendering
         let hasEnabledShadows = false;
         for (const [, shadowData] of this.shadowMaps) {
-            if (shadowData.light.enabled) {
+            if (shadowData.light.enabled && shadowData.light.castShadows) {
                 hasEnabledShadows = true;
                 break;
             }
@@ -17983,7 +18036,7 @@ class ShadowMapManager {
         try {
             // For each light that casts shadows
             for (const [lightId, shadowData] of this.shadowMaps) {
-                if (shadowData.light.enabled) {
+                if (shadowData.light.enabled && shadowData.light.castShadows) {
                     this.renderShadowMapInternal(lightId, instanceManager);
                 }
             }
@@ -17992,6 +18045,20 @@ class ShadowMapManager {
             // Restore GL state once after all shadow maps
             this.endShadowMapFrame();
         }
+    }
+    /**
+     * Checks if any lights in the array have shadows enabled.
+     * This is a fast check to determine if shadow rendering is needed at all.
+     * @param lights - Array of lights to check
+     * @returns true if at least one enabled light has castShadows set to true
+     */
+    hasAnyShadowCastingLights(lights) {
+        for (const light of lights) {
+            if (light.enabled && light.castShadows) {
+                return true;
+            }
+        }
+        return false;
     }
     /**
      * Updates all shadow maps using the provided array of lights.
@@ -18282,84 +18349,6 @@ ShadowMapManager.DEFAULT_BOUNDS = {
     min: fromValues(-1000, -1000, -1000),
     max: fromValues(1000, 1000, 1000)
 };
-
-/**
- * Manages uniform location caching for WebGL shader programs.
- * Automatically caches uniform locations on first access and provides
- * invalidation mechanisms for shader recompilation.
- *
- * This class follows SOLID principles and reduces repeated GL calls
- * by caching uniform locations per shader program.
- */
-class ShaderUniformCache {
-    constructor(gl) {
-        this.gl = gl;
-        this.cache = new Map();
-    }
-    /**
-     * Gets a uniform location, using cache if available.
-     * @param program - The shader program
-     * @param uniformName - Name of the uniform
-     * @returns The uniform location or null if not found
-     */
-    getLocation(program, uniformName) {
-        // Get or create program cache
-        if (!this.cache.has(program)) {
-            this.cache.set(program, new Map());
-        }
-        const programCache = this.cache.get(program);
-        // Get or query uniform location
-        if (!programCache.has(uniformName)) {
-            const location = this.gl.getUniformLocation(program, uniformName);
-            programCache.set(uniformName, location);
-        }
-        return programCache.get(uniformName);
-    }
-    /**
-     * Gets multiple uniform locations at once.
-     * Useful for initializing a set of commonly used uniforms.
-     * @param program - The shader program
-     * @param uniformNames - Array of uniform names
-     * @returns Map of uniform names to locations
-     */
-    getLocations(program, uniformNames) {
-        const locations = new Map();
-        for (const name of uniformNames) {
-            locations.set(name, this.getLocation(program, name));
-        }
-        return locations;
-    }
-    /**
-     * Invalidates cache for a specific program.
-     * Call this when a shader is recompiled or deleted.
-     * @param program - The shader program to invalidate
-     */
-    invalidateProgram(program) {
-        this.cache.delete(program);
-    }
-    /**
-     * Clears the entire cache.
-     * Call this on context loss or reset.
-     */
-    clear() {
-        this.cache.clear();
-    }
-    /**
-     * Gets the number of cached programs.
-     * Useful for debugging and monitoring.
-     */
-    getCachedProgramCount() {
-        return this.cache.size;
-    }
-    /**
-     * Gets the number of cached uniforms for a program.
-     * @param program - The shader program
-     */
-    getCachedUniformCount(program) {
-        var _a, _b;
-        return (_b = (_a = this.cache.get(program)) === null || _a === void 0 ? void 0 : _a.size) !== null && _b !== void 0 ? _b : 0;
-    }
-}
 
 class Frustum {
     constructor() {
@@ -18653,7 +18642,8 @@ class InstanceManager {
         this.gpuResources.gpuResourceCache.cacheModelMode();
         if (this.shadowMapManager) {
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
-            this.shadowMapManager.renderAllShadowMaps(this);
+            // Pass lights array for optimized early exit when no shadows are cast
+            this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
         }
         // Set multiple shadow map uniforms using new multi-shadow system
         if (this.shadowMapManager) {

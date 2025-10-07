@@ -3,12 +3,14 @@ import { GPUResourceCache } from './GPUResourceCache';
 import { IGPUResourceManager, IGPUResourceCache, Light, ModelData, MAX_BONES } from './types';
 import { mat4 } from 'gl-matrix';
 import type { ShadowMapManager } from './ShadowMapManager';
+import { ShaderUniformCache } from './ShaderUniformCache';
 
 export class GPUResourceManager implements IGPUResourceManager {
     private gl: WebGL2RenderingContext;
     private shaderSystem: ShaderSystem;
     public gpuResourceCache: IGPUResourceCache;
-    
+    private uniformCache: ShaderUniformCache;
+
     // Debug flag
     private static DEBUG_SHADOWS = false; // Set to true to enable debug logging
     
@@ -44,6 +46,7 @@ export class GPUResourceManager implements IGPUResourceManager {
     constructor(gl: WebGL2RenderingContext) {
         this.gl = gl;
         this.shaderSystem = new ShaderSystem(gl);
+        this.uniformCache = new ShaderUniformCache(gl);
         
         // Initialize lights array with default values
         this.lights = Array(this.MAX_LIGHTS).fill(null).map(() => ({
@@ -220,14 +223,14 @@ export class GPUResourceManager implements IGPUResourceManager {
     }
 
     setNormalMapEnabled(shader: WebGLProgram, enabled: boolean): void {
-        const location = this.gl.getUniformLocation(shader, 'u_UseNormalMap');
+        const location = this.uniformCache.getLocation(shader, 'u_UseNormalMap');
         if (location) {
             this.gl.uniform1i(location, enabled ? 1 : 0);
         }
     }
 
     setLightPosition(shader: WebGLProgram, lightPosition: [number, number, number]): void {
-        const location = this.gl.getUniformLocation(shader, 'u_LightPosition');
+        const location = this.uniformCache.getLocation(shader, 'u_LightPosition');
         if (location) {
             this.gl.uniform3fv(location, lightPosition);
         }
@@ -721,17 +724,18 @@ export class GPUResourceManager implements IGPUResourceManager {
 
     private updateCameraPositionUniforms(shader: WebGLProgram): void {
         if (this.dirtyCameraPosition) {
-            this.gl.uniform3fv(this.gl.getUniformLocation(shader, 'u_CameraPosition'), this.cameraPosition);
+            const location = this.uniformCache.getLocation(shader, 'u_CameraPosition');
+            if (location) this.gl.uniform3fv(location, this.cameraPosition);
             this.dirtyCameraPosition = false;
         }
     }
 
     private updateGIUniforms(shader: WebGLProgram): void {
         if (this.dirtyGIState) {
-            const skyLoc = this.gl.getUniformLocation(shader, 'u_SkyColor');
-            const groundLoc = this.gl.getUniformLocation(shader, 'u_GroundColor');
-            const intensityLoc = this.gl.getUniformLocation(shader, 'u_GIIntensity');
-            const wrapLoc = this.gl.getUniformLocation(shader, 'u_LambertWrap');
+            const skyLoc = this.uniformCache.getLocation(shader, 'u_SkyColor');
+            const groundLoc = this.uniformCache.getLocation(shader, 'u_GroundColor');
+            const intensityLoc = this.uniformCache.getLocation(shader, 'u_GIIntensity');
+            const wrapLoc = this.uniformCache.getLocation(shader, 'u_LambertWrap');
             
             if (skyLoc) this.gl.uniform3fv(skyLoc, this.giState.skyColor);
             if (groundLoc) this.gl.uniform3fv(groundLoc, this.giState.groundColor);
@@ -761,30 +765,42 @@ export class GPUResourceManager implements IGPUResourceManager {
             const light = this.lights[i];
             const prefix = `u_Lights[${i}]`;
 
-            this.gl.uniform1i(this.gl.getUniformLocation(shader, `${prefix}.enabled`), light.enabled ? 1 : 0);
-            this.gl.uniform1i(this.gl.getUniformLocation(shader, `${prefix}.type`), this.getLightTypeValue(light.type));
-            this.gl.uniform3fv(this.gl.getUniformLocation(shader, `${prefix}.color`), light.color);
-            this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.intensity`), light.intensity);
+            const enabledLoc = this.uniformCache.getLocation(shader, `${prefix}.enabled`);
+            if (enabledLoc) this.gl.uniform1i(enabledLoc, light.enabled ? 1 : 0);
+
+            const typeLoc = this.uniformCache.getLocation(shader, `${prefix}.type`);
+            if (typeLoc) this.gl.uniform1i(typeLoc, this.getLightTypeValue(light.type));
+
+            const colorLoc = this.uniformCache.getLocation(shader, `${prefix}.color`);
+            if (colorLoc) this.gl.uniform3fv(colorLoc, light.color);
+
+            const intensityLoc = this.uniformCache.getLocation(shader, `${prefix}.intensity`);
+            if (intensityLoc) this.gl.uniform1f(intensityLoc, light.intensity);
 
             if ('position' in light) {
-                this.gl.uniform3fv(this.gl.getUniformLocation(shader, `${prefix}.position`), light.position);
+                const posLoc = this.uniformCache.getLocation(shader, `${prefix}.position`);
+                if (posLoc) this.gl.uniform3fv(posLoc, light.position);
             }
             if ('direction' in light) {
-                this.gl.uniform3fv(this.gl.getUniformLocation(shader, `${prefix}.direction`), light.direction);
+                const dirLoc = this.uniformCache.getLocation(shader, `${prefix}.direction`);
+                if (dirLoc) this.gl.uniform3fv(dirLoc, light.direction);
             }
             if ('attenuation' in light) {
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.attenuation`), light.attenuation);
+                const attenLoc = this.uniformCache.getLocation(shader, `${prefix}.attenuation`);
+                if (attenLoc) this.gl.uniform1f(attenLoc, light.attenuation);
             }
             if ('cosAngle' in light) {
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.cosAngle`), light.cosAngle);
-                this.gl.uniform1f(this.gl.getUniformLocation(shader, `${prefix}.spotPenumbra`), light.spotPenumbra);
+                const angleLoc = this.uniformCache.getLocation(shader, `${prefix}.cosAngle`);
+                if (angleLoc) this.gl.uniform1f(angleLoc, light.cosAngle);
+                const penumbraLoc = this.uniformCache.getLocation(shader, `${prefix}.spotPenumbra`);
+                if (penumbraLoc) this.gl.uniform1f(penumbraLoc, light.spotPenumbra);
             }
         }
     }
 
     private updateLightEnableStates(shader: WebGLProgram): void {
         for (const index of this.dirtyLightStates) {
-            const location = this.gl.getUniformLocation(shader, `u_Lights[${index}].enabled`);
+            const location = this.uniformCache.getLocation(shader, `u_Lights[${index}].enabled`);
             if (location) {
                 this.gl.uniform1i(location, this.lights[index].enabled ? 1 : 0);
             }
@@ -871,7 +887,7 @@ export class GPUResourceManager implements IGPUResourceManager {
     ): void {
         this.gl.useProgram(shader);
         
-        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        const useShadowMapLoc = this.uniformCache.getLocation(shader, 'u_UseShadowMap');
         if (useShadowMapLoc) {
             this.gl.uniform1i(useShadowMapLoc, enabled ? 1 : 0);
         }
@@ -885,17 +901,17 @@ export class GPUResourceManager implements IGPUResourceManager {
             this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
             this.gl.bindTexture(this.gl.TEXTURE_3D, null);
             this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
-            const shadowMapLoc = this.gl.getUniformLocation(shader, 'u_ShadowMap');
+            const shadowMapLoc = this.uniformCache.getLocation(shader, 'u_ShadowMap');
             if (shadowMapLoc) {
                 this.gl.uniform1i(shadowMapLoc, 10);  // Tell shader to use texture unit 10
             }
 
-            const lightVPLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjection');
+            const lightVPLoc = this.uniformCache.getLocation(shader, 'u_LightViewProjection');
             if (lightVPLoc) {
                 this.gl.uniformMatrix4fv(lightVPLoc, false, lightViewProjection);
             }
 
-            const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+            const biasLoc = this.uniformCache.getLocation(shader, 'u_ShadowBias');
             if (biasLoc) {
                 this.gl.uniform1f(biasLoc, bias);
             }
@@ -922,14 +938,14 @@ export class GPUResourceManager implements IGPUResourceManager {
         }
         
         // Set global shadow map enabled flag
-        const useShadowMapLoc = this.gl.getUniformLocation(shader, 'u_UseShadowMap');
+        const useShadowMapLoc = this.uniformCache.getLocation(shader, 'u_UseShadowMap');
         const shadowsEnabled = activeShadowMapIndices.length > 0;
         if (useShadowMapLoc) {
             this.gl.uniform1i(useShadowMapLoc, shadowsEnabled ? 1 : 0);
         }
 
         // Set shadow bias
-        const biasLoc = this.gl.getUniformLocation(shader, 'u_ShadowBias');
+        const biasLoc = this.uniformCache.getLocation(shader, 'u_ShadowBias');
         if (biasLoc) {
             this.gl.uniform1f(biasLoc, bias);
         }
@@ -991,12 +1007,12 @@ export class GPUResourceManager implements IGPUResourceManager {
         }
 
         // Set uniform arrays
-        const shadowEnabledLoc = this.gl.getUniformLocation(shader, 'u_ShadowEnabled');
+        const shadowEnabledLoc = this.uniformCache.getLocation(shader, 'u_ShadowEnabled');
         if (shadowEnabledLoc) {
             this.gl.uniform1iv(shadowEnabledLoc, shadowEnabledArray);
         }
 
-        const lightToShadowMapLoc = this.gl.getUniformLocation(shader, 'u_LightToShadowMap');
+        const lightToShadowMapLoc = this.uniformCache.getLocation(shader, 'u_LightToShadowMap');
         if (lightToShadowMapLoc) {
             this.gl.uniform1iv(lightToShadowMapLoc, lightToShadowArray);
         }
@@ -1005,14 +1021,14 @@ export class GPUResourceManager implements IGPUResourceManager {
         // Each uniform points to the corresponding texture unit (10+i)
         for (let i = 0; i < 8; i++) {
             const uniformName = `u_ShadowMap${i}`;
-            const location = this.gl.getUniformLocation(shader, uniformName);
+            const location = this.uniformCache.getLocation(shader, uniformName);
             if (location !== null) {
                 this.gl.uniform1i(location, 10 + i);
             }
         }
 
         // Set light view-projection matrices array
-        const lightViewProjectionsLoc = this.gl.getUniformLocation(shader, 'u_LightViewProjections');
+        const lightViewProjectionsLoc = this.uniformCache.getLocation(shader, 'u_LightViewProjections');
         if (lightViewProjectionsLoc) {
             // Create a flat array of all matrices (8 matrices * 16 floats each)
             const allMatrices = new Float32Array(8 * 16);

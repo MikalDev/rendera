@@ -1,4 +1,5 @@
 import { MaterialData } from './types';
+import { ShaderUniformCache } from './ShaderUniformCache';
 
 // MaterialSystem for handling materials and shaders
 export class MaterialSystem {
@@ -6,6 +7,7 @@ export class MaterialSystem {
     private materials: Map<number, MaterialData>;
     private currentMaterial: number | null = null;
     private samplerTextureUnitMap: Record<string, number>;
+    private uniformCache: ShaderUniformCache;
 
     // Default textures for missing material properties
     private defaultTextures: Map<string, WebGLTexture> = new Map();
@@ -17,6 +19,7 @@ export class MaterialSystem {
         this.gl = gl;
         this.materials = new Map<number, MaterialData>();
         this.samplerTextureUnitMap = samplerTextureUnitMap;
+        this.uniformCache = new ShaderUniformCache(gl);
         this.createDefaultTextures();
     }
 
@@ -92,7 +95,7 @@ export class MaterialSystem {
         // Bind all samplers - either from material or use defaults
         // This prevents texture state from leaking between materials
         for (const [samplerName, textureUnit] of Object.entries(this.samplerTextureUnitMap)) {
-            const location = this.gl.getUniformLocation(shader, samplerName);
+            const location = this.uniformCache.getLocation(shader, samplerName);
             if (location === null) continue;
 
             this.gl.activeTexture(this.gl.TEXTURE0 + textureUnit);
@@ -113,7 +116,7 @@ export class MaterialSystem {
         // Set material uniforms
         if (material.uniforms) {
             for (const [name, value] of Object.entries(material.uniforms)) {
-                const location = this.gl.getUniformLocation(shader, name);
+                const location = this.uniformCache.getLocation(shader, name);
                 if (location === null) continue;
 
                 // Handle different uniform types

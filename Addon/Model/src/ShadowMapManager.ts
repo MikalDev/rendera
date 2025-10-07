@@ -768,34 +768,41 @@ export class ShadowMapManager {
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
+     * @param lights - Optional array of lights to check for shadow casting (for early exit optimization)
      */
-    renderAllShadowMaps(instanceManager: InstanceManager): void {
-        // Early exit if no shadow maps to render
+    renderAllShadowMaps(instanceManager: InstanceManager, lights?: Light[]): void {
+        // Ultra-fast early exit: if lights array is provided, check if ANY light casts shadows
+        // This avoids even checking the shadowMaps collection if no lights will cast shadows
+        if (lights && !this.hasAnyShadowCastingLights(lights)) {
+            return; // No lights cast shadows - skip EVERYTHING including state checks
+        }
+
+        // Early exit if no shadow maps have been created
         if (this.shadowMaps.size === 0) {
             return; // Skip entire shadow map stage including state store/restore
         }
-        
+
         // Check if any enabled lights need rendering
         let hasEnabledShadows = false;
         for (const [, shadowData] of this.shadowMaps) {
-            if (shadowData.light.enabled) {
+            if (shadowData.light.enabled && shadowData.light.castShadows) {
                 hasEnabledShadows = true;
                 break;
             }
         }
-        
+
         // Skip if no enabled shadow-casting lights
         if (!hasEnabledShadows) {
             return; // Bypass shadow state store/restore entirely
         }
-        
+
         // Cache GL state once for all shadow maps
         this.beginShadowMapFrame();
-        
+
         try {
             // For each light that casts shadows
             for (const [lightId, shadowData] of this.shadowMaps) {
-                if (shadowData.light.enabled) {
+                if (shadowData.light.enabled && shadowData.light.castShadows) {
                     this.renderShadowMapInternal(lightId, instanceManager);
                 }
             }
@@ -803,6 +810,21 @@ export class ShadowMapManager {
             // Restore GL state once after all shadow maps
             this.endShadowMapFrame();
         }
+    }
+
+    /**
+     * Checks if any lights in the array have shadows enabled.
+     * This is a fast check to determine if shadow rendering is needed at all.
+     * @param lights - Array of lights to check
+     * @returns true if at least one enabled light has castShadows set to true
+     */
+    hasAnyShadowCastingLights(lights: Light[]): boolean {
+        for (const light of lights) {
+            if (light.enabled && light.castShadows) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

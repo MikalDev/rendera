@@ -230,8 +230,16 @@ export declare class ShadowMapManager {
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
+     * @param lights - Optional array of lights to check for shadow casting (for early exit optimization)
      */
-    renderAllShadowMaps(instanceManager: InstanceManager): void;
+    renderAllShadowMaps(instanceManager: InstanceManager, lights?: Light[]): void;
+    /**
+     * Checks if any lights in the array have shadows enabled.
+     * This is a fast check to determine if shadow rendering is needed at all.
+     * @param lights - Array of lights to check
+     * @returns true if at least one enabled light has castShadows set to true
+     */
+    hasAnyShadowCastingLights(lights: Light[]): boolean;
     /**
      * Updates all shadow maps using the provided array of lights.
      * Iterates over the lights and updates the shadow map for each enabled light that casts shadows.

@@ -459,79 +459,43 @@ export class WebGLStateTracker {
 
     /**
      * Restore WebGL state from a snapshot
+     * @param snapshot The state snapshot to restore
      */
     public restore(snapshot: WebGLState): void {
         const gl = this.gl;
         const original = this.original;
 
-        // Restore textures
+        // Restore textures without validation - trust that textures are valid
         original.activeTexture(snapshot.activeTexture);
         for (const [unit, bindings] of snapshot.textureBindings.entries()) {
             original.activeTexture(gl.TEXTURE0 + unit);
             for (const [target, texture] of Object.entries(bindings)) {
-                // Validate texture before binding
-                if (texture && gl.isTexture(texture)) {
-                    original.bindTexture(Number(target), texture);
-                } else {
-                    original.bindTexture(Number(target), null);
-                }
+                original.bindTexture(Number(target), texture || null);
             }
         }
         original.activeTexture(snapshot.activeTexture);
 
-        // Restore framebuffers with validation
-        // Check if framebuffer is still valid before restoring
-        if (snapshot.boundFramebuffer && gl.isFramebuffer(snapshot.boundFramebuffer)) {
-            original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer);
-        } else if (snapshot.boundFramebuffer !== null) {
-            // Framebuffer was deleted, bind to default
-            console.warn('[rendera] WebGLStateTracker: Framebuffer was deleted, binding to default');
-            original.bindFramebuffer(gl.FRAMEBUFFER, null);
-        } else {
-            // Was already null, restore as null
-            original.bindFramebuffer(gl.FRAMEBUFFER, null);
-        }
+        // Restore framebuffers without validation - trust that framebuffers are valid
+        original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
 
         if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
-            if (snapshot.boundReadFramebuffer && gl.isFramebuffer(snapshot.boundReadFramebuffer)) {
-                original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer);
-            } else {
-                original.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-            }
+            original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer || null);
         }
 
         if (snapshot.boundDrawFramebuffer !== snapshot.boundFramebuffer) {
-            if (snapshot.boundDrawFramebuffer && gl.isFramebuffer(snapshot.boundDrawFramebuffer)) {
-                original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer);
-            } else {
-                original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-            }
+            original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer || null);
         }
 
         // IMPORTANT: Restore VAO first, before element array buffer
         // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
         // so we must restore the VAO before restoring the element buffer
-        if (snapshot.boundVertexArray && gl.isVertexArray(snapshot.boundVertexArray)) {
-            original.bindVertexArray(snapshot.boundVertexArray);
-        } else if (snapshot.boundVertexArray !== null) {
-            console.warn('[rendera] WebGLStateTracker: VAO was deleted, binding null');
-            original.bindVertexArray(null);
-        } else {
-            original.bindVertexArray(null);
-        }
+        // Restore without validation - trust that VAOs are valid
+        original.bindVertexArray(snapshot.boundVertexArray || null);
 
-        // Now restore buffers (including element array buffer)
-        if (snapshot.boundArrayBuffer && gl.isBuffer(snapshot.boundArrayBuffer)) {
-            original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer);
-        } else {
-            original.bindBuffer(gl.ARRAY_BUFFER, null);
-        }
-
-        if (snapshot.boundElementArrayBuffer && gl.isBuffer(snapshot.boundElementArrayBuffer)) {
-            original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer);
-        } else {
-            original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-        }
+        // Restore buffers without validation - trust that buffers are valid
+        // This avoids expensive gl.isBuffer calls
+        original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer || null);
+        original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer || null);
         if (snapshot.boundUniformBuffer !== undefined) {
             original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
         }
@@ -546,15 +510,8 @@ export class WebGLStateTracker {
             }
         }
 
-        // Restore program
-        if (snapshot.currentProgram && gl.isProgram(snapshot.currentProgram)) {
-            original.useProgram(snapshot.currentProgram);
-        } else if (snapshot.currentProgram !== null) {
-            console.warn('[rendera] WebGLStateTracker: Program was deleted, using null');
-            original.useProgram(null);
-        } else {
-            original.useProgram(null);
-        }
+        // Restore program without validation - trust that programs are valid
+        original.useProgram(snapshot.currentProgram || null);
 
         // Restore viewport and scissor
         original.viewport(...snapshot.viewport);

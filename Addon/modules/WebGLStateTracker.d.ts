@@ -74,6 +74,7 @@ export declare class WebGLStateTracker {
     snapshot(): WebGLState;
     /**
      * Restore WebGL state from a snapshot
+     * @param snapshot The state snapshot to restore
      */
     restore(snapshot: WebGLState): void;
     /**
