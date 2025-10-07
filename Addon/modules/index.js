@@ -14559,6 +14559,7 @@ class WebGLStateTracker {
             stencilZPass: gl.KEEP,
             colorMask: [true, true, true, true],
             clearColor: [0, 0, 0, 0],
+            clearDepth: 1,
             cullFaceMode: gl.BACK,
             frontFace: gl.CCW,
             polygonOffsetFactor: 0,
@@ -14596,6 +14597,7 @@ class WebGLStateTracker {
             stencilOp: gl.stencilOp.bind(gl),
             colorMask: gl.colorMask.bind(gl),
             clearColor: gl.clearColor.bind(gl),
+            clearDepth: gl.clearDepth.bind(gl),
             cullFace: gl.cullFace.bind(gl),
             frontFace: gl.frontFace.bind(gl),
             polygonOffset: gl.polygonOffset.bind(gl),
@@ -14761,6 +14763,10 @@ class WebGLStateTracker {
             state.clearColor = [r, g, b, a];
             return original.clearColor(r, g, b, a);
         };
+        gl.clearDepth = (depth) => {
+            state.clearDepth = depth;
+            return original.clearDepth(depth);
+        };
         gl.cullFace = (mode) => {
             state.cullFaceMode = mode;
             return original.cullFace(mode);
@@ -14848,6 +14854,7 @@ class WebGLStateTracker {
             stencilZPass: this.state.stencilZPass,
             colorMask: [...this.state.colorMask],
             clearColor: [...this.state.clearColor],
+            clearDepth: this.state.clearDepth,
             cullFaceMode: this.state.cullFaceMode,
             frontFace: this.state.frontFace,
             polygonOffsetFactor: this.state.polygonOffsetFactor,
@@ -14928,6 +14935,9 @@ class WebGLStateTracker {
         // Restore color state
         original.colorMask(...snapshot.colorMask);
         original.clearColor(...snapshot.clearColor);
+        if (snapshot.clearDepth !== undefined) {
+            original.clearDepth(snapshot.clearDepth);
+        }
         // Restore culling
         original.cullFace(snapshot.cullFaceMode);
         original.frontFace(snapshot.frontFace);
@@ -15102,23 +15112,55 @@ class GPUResourceCache {
     }
     /**
      * Cache the current GL state before shadow map rendering.
-     * Always queries fresh state to avoid stale references to deleted objects.
+     * Uses WebGLStateTracker snapshot when available for better performance.
      */
     cacheShadowMapState() {
-        // Always query fresh GL state to avoid stale references
-        this.tempShadowState = {
-            textureBinding2D: this.gl.getParameter(this.gl.TEXTURE_BINDING_2D),
-            framebufferBinding: this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING),
-            viewport: this.gl.getParameter(this.gl.VIEWPORT),
-            depthTest: this.gl.getParameter(this.gl.DEPTH_TEST),
-            depthFunc: this.gl.getParameter(this.gl.DEPTH_FUNC),
-            colorWritemask: this.gl.getParameter(this.gl.COLOR_WRITEMASK),
-            scissorTest: this.gl.getParameter(this.gl.SCISSOR_TEST),
-            blend: this.gl.getParameter(this.gl.BLEND),
-            currentProgram: this.gl.getParameter(this.gl.CURRENT_PROGRAM),
-            colorClearValue: this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE),
-            depthClearValue: this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE)
-        };
+        var _a, _b, _c, _d, _e, _f;
+        // Try to get state from WebGLStateTracker first (more efficient)
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker) {
+            const state = tracker.getState();
+            // Get current texture binding for active texture unit
+            const activeUnit = (state.activeTexture - this.gl.TEXTURE0);
+            const textureBinding2D = (_b = (_a = state.textureBindings.get(activeUnit)) === null || _a === void 0 ? void 0 : _a[this.gl.TEXTURE_2D]) !== null && _b !== void 0 ? _b : null;
+            // Convert viewport array if needed
+            const viewport = state.viewport.length === 4
+                ? new Int32Array(state.viewport)
+                : this.gl.getParameter(this.gl.VIEWPORT);
+            // Convert color clear value if needed
+            const colorClearValue = state.clearColor.length === 4
+                ? new Float32Array(state.clearColor)
+                : this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
+            this.tempShadowState = {
+                textureBinding2D: textureBinding2D,
+                framebufferBinding: state.boundFramebuffer,
+                viewport: viewport,
+                depthTest: (_c = state.capabilities.get(this.gl.DEPTH_TEST)) !== null && _c !== void 0 ? _c : false,
+                depthFunc: state.depthFunc,
+                colorWritemask: state.colorMask,
+                scissorTest: (_d = state.capabilities.get(this.gl.SCISSOR_TEST)) !== null && _d !== void 0 ? _d : false,
+                blend: (_e = state.capabilities.get(this.gl.BLEND)) !== null && _e !== void 0 ? _e : false,
+                currentProgram: state.currentProgram,
+                colorClearValue: colorClearValue,
+                depthClearValue: (_f = state.clearDepth) !== null && _f !== void 0 ? _f : 1.0 // Use tracked clearDepth value
+            };
+        }
+        else {
+            // Fallback to GL queries if tracker not available
+            this.tempShadowState = {
+                textureBinding2D: this.gl.getParameter(this.gl.TEXTURE_BINDING_2D),
+                framebufferBinding: this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING),
+                viewport: this.gl.getParameter(this.gl.VIEWPORT),
+                depthTest: this.gl.getParameter(this.gl.DEPTH_TEST),
+                depthFunc: this.gl.getParameter(this.gl.DEPTH_FUNC),
+                colorWritemask: this.gl.getParameter(this.gl.COLOR_WRITEMASK),
+                scissorTest: this.gl.getParameter(this.gl.SCISSOR_TEST),
+                blend: this.gl.getParameter(this.gl.BLEND),
+                currentProgram: this.gl.getParameter(this.gl.CURRENT_PROGRAM),
+                colorClearValue: this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE),
+                depthClearValue: this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE)
+            };
+        }
     }
     /**
      * Restore the cached GL state after shadow map rendering.
@@ -16174,6 +16216,13 @@ class GPUResourceManager {
         const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
         this.linkUniformBlocks(program);
         return program;
+    }
+    /**
+     * Gets the WebGLStateTracker instance if available
+     * @returns The WebGLStateTracker instance or undefined
+     */
+    getWebGLStateTracker() {
+        return WebGLStateTracker.getInstance();
     }
 }
 // Debug flag
@@ -17572,12 +17621,33 @@ class ShadowMapManager {
      * @private
      */
     createShadowMapResources(light) {
-        // Store current WebGL state
-        const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
-        const currentFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
-        const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
-        const currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
-        const currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+        var _a, _b, _c, _d, _e;
+        // Store current WebGL state using tracker snapshot if available
+        let currentTexture;
+        let currentFramebuffer;
+        let currentDepthTest;
+        let currentDepthFunc;
+        let currentColorMask;
+        // Try to get state from WebGLStateTracker first (more efficient)
+        const tracker = (_b = (_a = this.gpuResourceManager).getWebGLStateTracker) === null || _b === void 0 ? void 0 : _b.call(_a);
+        if (tracker) {
+            const state = tracker.getState();
+            // Get current texture binding for active texture unit
+            const activeUnit = (state.activeTexture - this.gl.TEXTURE0);
+            currentTexture = (_d = (_c = state.textureBindings.get(activeUnit)) === null || _c === void 0 ? void 0 : _c[this.gl.TEXTURE_2D]) !== null && _d !== void 0 ? _d : null;
+            currentFramebuffer = state.boundFramebuffer;
+            currentDepthTest = (_e = state.capabilities.get(this.gl.DEPTH_TEST)) !== null && _e !== void 0 ? _e : false;
+            currentDepthFunc = state.depthFunc;
+            currentColorMask = state.colorMask;
+        }
+        else {
+            // Fallback to GL queries if tracker not available
+            currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+            currentFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
+            currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
+            currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
+            currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+        }
         try {
             // Create resources
             const texture = this.createGLResource(() => this.gl.createTexture(), 'texture');

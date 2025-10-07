@@ -231,19 +231,39 @@ export class ShadowMapManager {
     /**
      * Creates shadow map resources for a light.
      * Sets up the depth texture, framebuffer, and other WebGL resources needed for shadow mapping.
-     * 
+     *
      * @param light - The light to create shadow map resources for
      * @returns The created shadow map resources
      * @throws Error if framebuffer initialization fails
      * @private
      */
     private createShadowMapResources(light: Light): ShadowMapData {
-        // Store current WebGL state
-        const currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
-        const currentFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
-        const currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
-        const currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
-        const currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+        // Store current WebGL state using tracker snapshot if available
+        let currentTexture: WebGLTexture | null;
+        let currentFramebuffer: WebGLFramebuffer | null;
+        let currentDepthTest: boolean;
+        let currentDepthFunc: number;
+        let currentColorMask: boolean[];
+
+        // Try to get state from WebGLStateTracker first (more efficient)
+        const tracker = (this.gpuResourceManager as any).getWebGLStateTracker?.();
+        if (tracker) {
+            const state = tracker.getState();
+            // Get current texture binding for active texture unit
+            const activeUnit = (state.activeTexture - this.gl.TEXTURE0);
+            currentTexture = state.textureBindings.get(activeUnit)?.[this.gl.TEXTURE_2D] ?? null;
+            currentFramebuffer = state.boundFramebuffer;
+            currentDepthTest = state.capabilities.get(this.gl.DEPTH_TEST) ?? false;
+            currentDepthFunc = state.depthFunc;
+            currentColorMask = state.colorMask;
+        } else {
+            // Fallback to GL queries if tracker not available
+            currentTexture = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
+            currentFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
+            currentDepthTest = this.gl.getParameter(this.gl.DEPTH_TEST);
+            currentDepthFunc = this.gl.getParameter(this.gl.DEPTH_FUNC);
+            currentColorMask = this.gl.getParameter(this.gl.COLOR_WRITEMASK);
+        }
 
         try {
             // Create resources

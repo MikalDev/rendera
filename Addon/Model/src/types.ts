@@ -332,6 +332,7 @@ export interface IGPUResourceManager {
     updateBoneUBO(boneMatrices: Float32Array, boneCount: number): void;
     gpuResourceCache: IGPUResourceCache;
     lights: Light[];
+    getWebGLStateTracker?(): any; // Optional: returns WebGLStateTracker instance if available
 }
 
 // Add this type definition

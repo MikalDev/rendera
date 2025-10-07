@@ -77,6 +77,11 @@ export declare class GPUResourceManager implements IGPUResourceManager {
      */
     private createDummyShadowTexture;
     getShadowMapShader(): WebGLProgram;
+    /**
+     * Gets the WebGLStateTracker instance if available
+     * @returns The WebGLStateTracker instance or undefined
+     */
+    getWebGLStateTracker(): any;
 }
 export declare class ShaderSystem {
     private gl;

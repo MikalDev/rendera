@@ -173,23 +173,57 @@ export class GPUResourceCache implements IGPUResourceCache {
 
     /**
      * Cache the current GL state before shadow map rendering.
-     * Always queries fresh state to avoid stale references to deleted objects.
+     * Uses WebGLStateTracker snapshot when available for better performance.
      */
     cacheShadowMapState(): void {
-        // Always query fresh GL state to avoid stale references
-        this.tempShadowState = {
-            textureBinding2D: this.gl.getParameter(this.gl.TEXTURE_BINDING_2D),
-            framebufferBinding: this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING),
-            viewport: this.gl.getParameter(this.gl.VIEWPORT),
-            depthTest: this.gl.getParameter(this.gl.DEPTH_TEST),
-            depthFunc: this.gl.getParameter(this.gl.DEPTH_FUNC),
-            colorWritemask: this.gl.getParameter(this.gl.COLOR_WRITEMASK),
-            scissorTest: this.gl.getParameter(this.gl.SCISSOR_TEST),
-            blend: this.gl.getParameter(this.gl.BLEND),
-            currentProgram: this.gl.getParameter(this.gl.CURRENT_PROGRAM),
-            colorClearValue: this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE),
-            depthClearValue: this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE)
-        };
+        // Try to get state from WebGLStateTracker first (more efficient)
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker) {
+            const state = tracker.getState();
+
+            // Get current texture binding for active texture unit
+            const activeUnit = (state.activeTexture - this.gl.TEXTURE0);
+            const textureBinding2D = state.textureBindings.get(activeUnit)?.[this.gl.TEXTURE_2D] ?? null;
+
+            // Convert viewport array if needed
+            const viewport = state.viewport.length === 4
+                ? new Int32Array(state.viewport)
+                : this.gl.getParameter(this.gl.VIEWPORT);
+
+            // Convert color clear value if needed
+            const colorClearValue = state.clearColor.length === 4
+                ? new Float32Array(state.clearColor)
+                : this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
+
+            this.tempShadowState = {
+                textureBinding2D: textureBinding2D,
+                framebufferBinding: state.boundFramebuffer,
+                viewport: viewport,
+                depthTest: state.capabilities.get(this.gl.DEPTH_TEST) ?? false,
+                depthFunc: state.depthFunc,
+                colorWritemask: state.colorMask,
+                scissorTest: state.capabilities.get(this.gl.SCISSOR_TEST) ?? false,
+                blend: state.capabilities.get(this.gl.BLEND) ?? false,
+                currentProgram: state.currentProgram,
+                colorClearValue: colorClearValue,
+                depthClearValue: state.clearDepth ?? 1.0  // Use tracked clearDepth value
+            };
+        } else {
+            // Fallback to GL queries if tracker not available
+            this.tempShadowState = {
+                textureBinding2D: this.gl.getParameter(this.gl.TEXTURE_BINDING_2D),
+                framebufferBinding: this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING),
+                viewport: this.gl.getParameter(this.gl.VIEWPORT),
+                depthTest: this.gl.getParameter(this.gl.DEPTH_TEST),
+                depthFunc: this.gl.getParameter(this.gl.DEPTH_FUNC),
+                colorWritemask: this.gl.getParameter(this.gl.COLOR_WRITEMASK),
+                scissorTest: this.gl.getParameter(this.gl.SCISSOR_TEST),
+                blend: this.gl.getParameter(this.gl.BLEND),
+                currentProgram: this.gl.getParameter(this.gl.CURRENT_PROGRAM),
+                colorClearValue: this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE),
+                depthClearValue: this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE)
+            };
+        }
     }
 
     /**

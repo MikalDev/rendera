@@ -232,6 +232,7 @@ export interface IGPUResourceManager {
     updateBoneUBO(boneMatrices: Float32Array, boneCount: number): void;
     gpuResourceCache: IGPUResourceCache;
     lights: Light[];
+    getWebGLStateTracker?(): any;
 }
 export type AttributeSemantic = 'POSITION' | 'NORMAL' | 'TEXCOORD_0' | 'JOINTS_0' | 'WEIGHTS_0';
 export interface LightBase {

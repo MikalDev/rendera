@@ -4,6 +4,7 @@ import { IGPUResourceManager, IGPUResourceCache, Light, ModelData, MAX_BONES } f
 import { mat4 } from 'gl-matrix';
 import type { ShadowMapManager } from './ShadowMapManager';
 import { ShaderUniformCache } from './ShaderUniformCache';
+import { WebGLStateTracker } from './WebGLStateTracker';
 
 export class GPUResourceManager implements IGPUResourceManager {
     private gl: WebGL2RenderingContext;
@@ -1148,6 +1149,14 @@ export class GPUResourceManager implements IGPUResourceManager {
         const program = this.shaderSystem.createProgram(vertexShader, fragmentShader, 'shadowmap');
         this.linkUniformBlocks(program);
         return program;
+    }
+
+    /**
+     * Gets the WebGLStateTracker instance if available
+     * @returns The WebGLStateTracker instance or undefined
+     */
+    getWebGLStateTracker(): any {
+        return WebGLStateTracker.getInstance();
     }
 }
 

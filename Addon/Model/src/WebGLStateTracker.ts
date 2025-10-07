@@ -60,6 +60,9 @@ export interface WebGLState {
     colorMask: boolean[];
     clearColor: number[];
 
+    // Clear values
+    clearDepth: number;
+
     // Culling
     cullFaceMode: number;
     frontFace: number;
@@ -126,6 +129,7 @@ export class WebGLStateTracker {
             stencilZPass: gl.KEEP,
             colorMask: [true, true, true, true],
             clearColor: [0, 0, 0, 0],
+            clearDepth: 1,
             cullFaceMode: gl.BACK,
             frontFace: gl.CCW,
             polygonOffsetFactor: 0,
@@ -164,6 +168,7 @@ export class WebGLStateTracker {
             stencilOp: gl.stencilOp.bind(gl),
             colorMask: gl.colorMask.bind(gl),
             clearColor: gl.clearColor.bind(gl),
+            clearDepth: gl.clearDepth.bind(gl),
             cullFace: gl.cullFace.bind(gl),
             frontFace: gl.frontFace.bind(gl),
             polygonOffset: gl.polygonOffset.bind(gl),
@@ -353,6 +358,11 @@ export class WebGLStateTracker {
             return original.clearColor(r, g, b, a);
         };
 
+        (gl as any).clearDepth = (depth: number) => {
+            state.clearDepth = depth;
+            return original.clearDepth(depth);
+        };
+
         (gl as any).cullFace = (mode: number) => {
             state.cullFaceMode = mode;
             return original.cullFace(mode);
@@ -449,6 +459,7 @@ export class WebGLStateTracker {
             stencilZPass: this.state.stencilZPass,
             colorMask: [...this.state.colorMask],
             clearColor: [...this.state.clearColor],
+            clearDepth: this.state.clearDepth,
             cullFaceMode: this.state.cullFaceMode,
             frontFace: this.state.frontFace,
             polygonOffsetFactor: this.state.polygonOffsetFactor,
@@ -551,6 +562,9 @@ export class WebGLStateTracker {
         // Restore color state
         original.colorMask(...snapshot.colorMask);
         original.clearColor(...snapshot.clearColor);
+        if (snapshot.clearDepth !== undefined) {
+            original.clearDepth(snapshot.clearDepth);
+        }
 
         // Restore culling
         original.cullFace(snapshot.cullFaceMode);

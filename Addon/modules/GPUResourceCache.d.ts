@@ -15,7 +15,7 @@ export declare class GPUResourceCache implements IGPUResourceCache {
     private cleanupTextureUnits;
     /**
      * Cache the current GL state before shadow map rendering.
-     * Always queries fresh state to avoid stale references to deleted objects.
+     * Uses WebGLStateTracker snapshot when available for better performance.
      */
     cacheShadowMapState(): void;
     /**

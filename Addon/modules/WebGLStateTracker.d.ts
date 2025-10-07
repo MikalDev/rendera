@@ -35,6 +35,7 @@ export interface WebGLState {
     stencilZPass: number;
     colorMask: boolean[];
     clearColor: number[];
+    clearDepth: number;
     cullFaceMode: number;
     frontFace: number;
     polygonOffsetFactor: number;
