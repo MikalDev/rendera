@@ -14209,6 +14209,8 @@ class ModelLoader {
             const buffer = this.createAttributeBuffer(accessor);
             attributes[semantic] = buffer;
             const location = this.getAttributeLocation(semantic);
+            if (location === -1)
+                continue; // Skip attributes we don't have locations for
             this.gl.enableVertexAttribArray(location);
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
             const componentType = accessor.getComponentType();
@@ -14501,6 +14503,8 @@ class ModelLoader {
             case 'JOINTS_0': return 3;
             case 'WEIGHTS_0': return 4;
             case 'TANGENT': return 5;
+            case 'TEXCOORD_1': return -1;
+            case 'TEXCOORD_2': return -1;
             default: throw this.createModelError(ModelErrorCode.INVALID_DATA, `Unsupported attribute semantic: ${semantic}`);
         }
     }
