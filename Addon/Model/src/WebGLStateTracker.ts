@@ -521,8 +521,18 @@ export class WebGLStateTracker {
             }
         }
 
-        // Restore program without validation - trust that programs are valid
-        original.useProgram(snapshot.currentProgram || null);
+        // Restore program with validation - only restore if valid
+        if (snapshot.currentProgram) {
+            const isValidProgram = gl.isProgram(snapshot.currentProgram);
+            if (!isValidProgram) {
+                console.error('[WebGLStateTracker] Invalid shader program detected during restore - skipping restoration:', snapshot.currentProgram);
+                original.useProgram(null);  // Unbind program instead of using invalid one
+            } else {
+                original.useProgram(snapshot.currentProgram);
+            }
+        } else {
+            original.useProgram(null);
+        }
 
         // Restore viewport and scissor
         original.viewport(...snapshot.viewport);
@@ -580,8 +590,11 @@ export class WebGLStateTracker {
             }
         }
 
-        // Update internal state
-        this.state = this.snapshot(); // Re-snapshot to update internal state
+        // CRITICAL: Synchronize tracker's internal state with the snapshot
+        // Without this, the tracker state becomes desynchronized from actual GL state
+        // because restore() uses original methods which bypass the monkeypatch
+        // snapshot() creates deep copies of Maps and arrays, so direct assignment is safe
+        this.state = snapshot;
     }
 
     /**

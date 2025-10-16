@@ -49,47 +49,6 @@ export class GPUResourceCache implements IGPUResourceCache {
             this.cachedModelState = tracker.snapshot();
             return;
         }
-
-        // Fallback to old implementation if tracker not available
-        // console.log('[rendera] GPUResourceCache: cacheModelMode (fallback)');
-
-        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
-        // Get currently bound VAO
-        const vao = this.gl.getParameter(this.gl.VERTEX_ARRAY_BINDING);
-
-        // Get currently bound texture
-        const textureBinding = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
-
-        // Get current shader program
-        const shaderProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
-
-        // Get current element array buffer
-        const elementArrayBuffer = this.gl.getParameter(this.gl.ELEMENT_ARRAY_BUFFER_BINDING);
-
-        // Get active texture unit
-        const activeTexture = this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
-
-        // Get array buffer binding
-        const arrayBuffer = this.gl.getParameter(this.gl.ARRAY_BUFFER_BINDING);
-
-        // Get uniform buffer bindings for tracked binding points
-        const uniformBufferBindings: (WebGLBuffer | null)[] = [];
-        for (const bindingPoint of GPUResourceCache.TRACKED_UBO_BINDING_POINTS) {
-            const buffer = this.gl.getIndexedParameter(this.gl.UNIFORM_BUFFER_BINDING, bindingPoint);
-            uniformBufferBindings.push(buffer);
-        }
-
-        this.cachedState = {
-            vao,
-            textureBinding,
-            shaderProgram,
-            elementArrayBuffer,
-            activeTexture,
-            arrayBuffer,
-            uniformBufferBindings
-        };
-        //console.log('[rendera] GPUResourceCache: cachedState', this.cachedState);
-        */
     }
 
     restoreModelMode() {
@@ -106,69 +65,58 @@ export class GPUResourceCache implements IGPUResourceCache {
             this.cachedModelState = null;
             return;
         }
-
-        // Fallback to old implementation if tracker not available
-        // console.log('[rendera] GPUResourceCache: restoreModelMode (fallback)');
-
-        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
-        if (this.cachedState) {
-            // console.log('[rendera] GPUResourceCache: restoreModelMode', this.cachedState);
-
-            // First, clean up any texture bindings we might have created on units 1-17
-            // This ensures C3 doesn't encounter unexpected textures
-            this.cleanupTextureUnits();
-
-            // Restore active texture unit first (before binding textures)
-            this.gl.activeTexture(this.cachedState.activeTexture);
-
-            // Restore original 4 states
-            this.gl.bindVertexArray(this.cachedState.vao);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, this.cachedState.textureBinding);
-            this.gl.useProgram(this.cachedState.shaderProgram);
-            this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.cachedState.elementArrayBuffer);
-
-            // Restore additional states
-            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.cachedState.arrayBuffer);
-
-            // Restore uniform buffer bindings
-            for (let i = 0; i < this.cachedState.uniformBufferBindings.length; i++) {
-                const bindingPoint = GPUResourceCache.TRACKED_UBO_BINDING_POINTS[i];
-                const buffer = this.cachedState.uniformBufferBindings[i];
-                if (buffer !== undefined) {
-                    this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, bindingPoint, buffer);
-                }
-            }
-
-            // Clear cached state after restoration
-            this.cachedState = null;
-        }
-        */
     }
 
     /**
      * Clean up texture bindings on units we use (1-17) to avoid conflicts with C3
      * We skip unit 0 as it will be restored from cached state
+     *
+     * IMPORTANT: Uses original GL methods (via tracker) to avoid polluting tracker state
+     * before restore() syncs it back to the snapshot.
      */
     private cleanupTextureUnits(): void {
-        // Use cached activeTexture from new state, fallback to old state, or query GL
+        // Get the WebGLStateTracker to access original methods
+        const tracker = WebGLStateTracker.getInstance();
+        if (!tracker) {
+            // Fallback: use regular GL methods if tracker not available
+            const currentActiveTexture = this.cachedModelState?.activeTexture ??
+                                        this.cachedState?.activeTexture ??
+                                        this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+
+            for (let unit = 1; unit <= 4; unit++) {
+                this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            }
+
+            for (let unit = 10; unit <= 17; unit++) {
+                this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            }
+
+            this.gl.activeTexture(currentActiveTexture);
+            return;
+        }
+
+        // Use original methods to avoid updating tracker state
+        const original = tracker.getOriginalMethods();
         const currentActiveTexture = this.cachedModelState?.activeTexture ??
                                     this.cachedState?.activeTexture ??
                                     this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
-        
-        // Clean material texture units (1-4)
+
+        // Clean material texture units (1-4) using original methods
         for (let unit = 1; unit <= 4; unit++) {
-            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            original.activeTexture(this.gl.TEXTURE0 + unit);
+            original.bindTexture(this.gl.TEXTURE_2D, null);
         }
-        
-        // Clean shadow map texture units (10-17)
+
+        // Clean shadow map texture units (10-17) using original methods
         for (let unit = 10; unit <= 17; unit++) {
-            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            original.activeTexture(this.gl.TEXTURE0 + unit);
+            original.bindTexture(this.gl.TEXTURE_2D, null);
         }
-        
-        // Restore the active texture unit
-        this.gl.activeTexture(currentActiveTexture);
+
+        // Restore the active texture unit using original method
+        original.activeTexture(currentActiveTexture);
     }
 
     /**
@@ -267,8 +215,16 @@ export class GPUResourceCache implements IGPUResourceCache {
             } else {
                 this.gl.disable(this.gl.BLEND);
             }
-            
-            this.gl.useProgram(this.tempShadowState.currentProgram);
+
+            // Validate program before restoring - only restore if valid
+            if (this.tempShadowState.currentProgram && this.gl.isProgram(this.tempShadowState.currentProgram)) {
+                this.gl.useProgram(this.tempShadowState.currentProgram);
+            } else {
+                if (this.tempShadowState.currentProgram) {
+                    console.error('[GPUResourceCache] Invalid shader program detected during restore - skipping restoration');
+                }
+                this.gl.useProgram(null);  // Unbind program instead of using invalid one
+            }
             this.gl.clearColor(
                 this.tempShadowState.colorClearValue[0],
                 this.tempShadowState.colorClearValue[1],

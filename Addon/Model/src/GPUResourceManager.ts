@@ -819,7 +819,7 @@ export class GPUResourceManager implements IGPUResourceManager {
 
     bindShaderAndMaterial(shader: WebGLProgram, materialIndex: number, modelData: ModelData): void {
         const materialSystem = modelData.materialSystem;
-        this.gl.useProgram(shader);
+        // Shader is already bound by caller - no need to bind again
         this.updateCameraPositionUniforms(shader);
         this.updateLightUniforms(shader);
         this.updateGIUniforms(shader);
@@ -877,49 +877,6 @@ export class GPUResourceManager implements IGPUResourceManager {
     }
 
     /**
-     * @deprecated Use setMultipleShadowMapUniforms instead
-     */
-    setShadowMapUniforms(
-        shader: WebGLProgram, 
-        enabled: boolean, 
-        shadowMap: WebGLTexture | null = null,
-        lightViewProjection: mat4 | null = null,
-        bias: number = 0.001
-    ): void {
-        this.gl.useProgram(shader);
-        
-        const useShadowMapLoc = this.uniformCache.getLocation(shader, 'u_UseShadowMap');
-        if (useShadowMapLoc) {
-            this.gl.uniform1i(useShadowMapLoc, enabled ? 1 : 0);
-        }
-
-        if (enabled && shadowMap && lightViewProjection) {
-            // Use texture unit 10 for shadow map
-            this.gl.activeTexture(this.gl.TEXTURE10);  // Changed from TEXTURE7
-            // Clear any existing texture bindings to prevent type conflicts with C3
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
-            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
-            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
-            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
-            const shadowMapLoc = this.uniformCache.getLocation(shader, 'u_ShadowMap');
-            if (shadowMapLoc) {
-                this.gl.uniform1i(shadowMapLoc, 10);  // Tell shader to use texture unit 10
-            }
-
-            const lightVPLoc = this.uniformCache.getLocation(shader, 'u_LightViewProjection');
-            if (lightVPLoc) {
-                this.gl.uniformMatrix4fv(lightVPLoc, false, lightViewProjection);
-            }
-
-            const biasLoc = this.uniformCache.getLocation(shader, 'u_ShadowBias');
-            if (biasLoc) {
-                this.gl.uniform1f(biasLoc, bias);
-            }
-        }
-    }
-
-    /**
      * Sets uniforms for multiple shadow maps using data from ShadowMapManager.
      * This method replaces setShadowMapUniforms for the new multi-shadow architecture.
      */
@@ -928,8 +885,14 @@ export class GPUResourceManager implements IGPUResourceManager {
         shadowMapManager: ShadowMapManager,
         bias: number = 0.001
     ): void {
+        // Validate shader program before using it
+        if (!this.gl.isProgram(shader)) {
+            console.error('[GPUResourceManager] Invalid shader program provided to setMultipleShadowMapUniforms');
+            return;
+        }
+
         this.gl.useProgram(shader);
-        
+
         // Get active shadow map data
         const activeShadowMapIndices = shadowMapManager.getActiveShadowMapIndices();
         const lightToShadowMapping = shadowMapManager.getLightToShadowMapMapping();
@@ -1181,21 +1144,6 @@ export class ShaderSystem {
         );
         this.programs.set(name, program);
         return program;
-    }
-
-    useProgram(name: string): void {
-        const program = this.programs.get(name);
-        if (!program) {
-            throw this.createError(
-                ModelErrorCode.RESOURCE_NOT_FOUND,
-                `Shader program '${name}' not found`
-            );
-        }
-
-        if (this.currentProgram !== program) {
-            this.gl.useProgram(program);
-            this.currentProgram = program;
-        }
     }
 
     private compileProgram(
