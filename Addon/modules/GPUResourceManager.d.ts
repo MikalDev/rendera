@@ -1,5 +1,4 @@
 import { IGPUResourceManager, IGPUResourceCache, Light, ModelData } from './types';
-import { mat4 } from 'gl-matrix';
 import type { ShadowMapManager } from './ShadowMapManager';
 export declare class GPUResourceManager implements IGPUResourceManager {
     private gl;
@@ -59,10 +58,6 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     setLightCastShadows(index: number, castShadows: boolean): void;
     private validateShadowCount;
     /**
-     * @deprecated Use setMultipleShadowMapUniforms instead
-     */
-    setShadowMapUniforms(shader: WebGLProgram, enabled: boolean, shadowMap?: WebGLTexture | null, lightViewProjection?: mat4 | null, bias?: number): void;
-    /**
      * Sets uniforms for multiple shadow maps using data from ShadowMapManager.
      * This method replaces setShadowMapUniforms for the new multi-shadow architecture.
      */
@@ -89,7 +84,6 @@ export declare class ShaderSystem {
     private programs;
     constructor(gl: WebGL2RenderingContext);
     createProgram(vertexSource: string, fragmentSource: string, name: string): WebGLProgram;
-    useProgram(name: string): void;
     private compileProgram;
     private compileShader;
     private createError;

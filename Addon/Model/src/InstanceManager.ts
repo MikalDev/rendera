@@ -171,7 +171,8 @@ export class InstanceManager implements IInstanceManager {
             disabledNodes: new Set<string>(),
             allNodesDisabled: false,
             tintColor: [1, 1, 1], // Default white tint (no tinting)
-            opacity: 1 // Default fully opaque
+            opacity: 1, // Default fully opaque
+            materialOverrides: new Map<string, number>() // Material overrides per primitive
         };
 
         // Store instance
@@ -214,6 +215,12 @@ export class InstanceManager implements IInstanceManager {
         if (tick !== undefined) {
             this.lastRenderTick = tick;
         }
+
+        // Early exit if there are no instances to render
+        if (this.instances.size === 0) {
+            return;
+        }
+
         // Render each model group
         // @ts-ignore
         let renderer: WebGLRenderer;
@@ -368,11 +375,9 @@ export class InstanceManager implements IInstanceManager {
     ): void {
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData) return;
-        
 
-        // Basic shader setup TODO: move to GPUResourceManager
-        this.gl.useProgram(this.defaultShaderProgram);
-
+        // Shader is already bound by setMultipleShadowMapUniforms in the render() function
+        // No need to bind it again here
 
         // For each instance
         for (const instanceId of instanceGroup) {
@@ -410,20 +415,23 @@ export class InstanceManager implements IInstanceManager {
                 }
                 
                 const mesh = renderableNode.modelMesh;
-                for (const primitive of mesh.primitives) {
-                    // const material = modelData.materials[primitive.material];
+                for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex++) {
+                    const primitive = mesh.primitives[primitiveIndex];
+
+                    // Check for material override for this instance
+                    const primitiveKey = `${renderableNode.node.indexData.nodeIndex}_${primitiveIndex}`;
+                    const materialIndex = instance.materialOverrides.get(primitiveKey) ?? primitive.material;
+
+                    // const material = modelData.materials[materialIndex];
                     // const shader = material.program;
                     // TODO: move to GPUResourceManager
                     const shader = this.defaultShaderProgram;
 
-                    // 1. Bind shader
-                    // TODO: move to GPUResourceManager
-                    this.gl.useProgram(shader);
-
-                    // 2. Bind VAO (contains vertex attributes setup)
+                    // Shader is already bound - no need to bind again
+                    // 1. Bind VAO (contains vertex attributes setup)
                     this.gl.bindVertexArray(primitive.vao);
 
-                    // 3. Set required uniforms using cached locations
+                    // 2. Set required uniforms using cached locations
                     const viewLoc = this.uniformCache.getLocation(shader, 'u_View');
                     const projectionLoc = this.uniformCache.getLocation(shader, 'u_Projection');
                     const modelLoc = this.uniformCache.getLocation(shader, 'u_Model');
@@ -488,16 +496,17 @@ export class InstanceManager implements IInstanceManager {
 
                     const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
                     this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);
-                   
-                    // 5. Bind material properties (textures and uniforms)
-                    this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, primitive.material, modelData);
 
-                    // 6. Handle winding order for coordinate conversion
+                    // 3. Bind material properties (textures and uniforms)
+                    // Use materialIndex which may be overridden per instance
+                    this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, materialIndex, modelData);
+
+                    // 4. Handle winding order for coordinate conversion
                     // Since we flip Y and Z axes (2 flips), triangle winding is reversed
                     // Switch from CCW (default) to CW for proper culling
                     this.gl.frontFace(this.gl.CW);
-                    
-                    // 7. Draw
+
+                    // 5. Draw
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(
                             this.gl.TRIANGLES,
@@ -734,6 +743,52 @@ export class InstanceManager implements IInstanceManager {
 
     get animationController(): AnimationController {
         return this._animationController;
+    }
+
+    /**
+     * Sets the material for a specific node (and all its primitives).
+     * @param instance The model instance
+     * @param nodeName The name of the node
+     * @param materialIndex The material index to use
+     */
+    public setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void {
+        const instanceData = this.instances.get(instance.instanceId.id);
+        if (!instanceData) {
+            console.warn(`[InstanceManager] Instance ${instance.instanceId.id} not found`);
+            return;
+        }
+
+        const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
+        if (!modelData) {
+            console.warn(`[InstanceManager] Model data not found for ${instance.instanceId.modelId}`);
+            return;
+        }
+
+        // Validate material index
+        const materials = modelData.materialSystem.materials;
+        if (materialIndex < 0 || materialIndex >= materials.size) {
+            console.warn(`[InstanceManager] Invalid material index ${materialIndex}. Model has ${materials.size} materials.`);
+            return;
+        }
+
+        // Find the node by name
+        const extendedNode = modelData.nodeNameMap.get(nodeName);
+        if (!extendedNode) {
+            console.warn(`[InstanceManager] Node "${nodeName}" not found in model`);
+            return;
+        }
+
+        // Set material for all primitives in this node
+        for (const renderableNode of modelData.renderableNodes) {
+            if (renderableNode.node === extendedNode) {
+                const nodeIndex = renderableNode.node.indexData.nodeIndex;
+                for (let primitiveIndex = 0; primitiveIndex < renderableNode.modelMesh.primitives.length; primitiveIndex++) {
+                    const primitiveKey = `${nodeIndex}_${primitiveIndex}`;
+                    instanceData.materialOverrides.set(primitiveKey, materialIndex);
+                }
+                break;
+            }
+        }
     }
 }
 

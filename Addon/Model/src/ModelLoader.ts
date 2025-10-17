@@ -149,11 +149,9 @@ export class ModelLoader implements IModelLoader {
         ]);
         */
 
-        this.gpuResources.gpuResourceCache.cacheModelMode();
         // Process each component sequentially for easier debugging
         await this.processJoints(document, modelData);
         await this.processRenderableNodes(document, modelData);
-        this.gpuResources.gpuResourceCache.restoreModelMode();
         await this.processMaterials(document, modelData);
         await this.processAnimations(document, modelData);
 

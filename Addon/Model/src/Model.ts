@@ -169,4 +169,20 @@ export class Model implements IModel {
         this._manager.markInstanceDirty(this.instanceId.id);
     }
 
+    /**
+     * Sets the material for a specific node (and all its primitives).
+     * @param nodeName The name of the node (or 'node_<index>' for unnamed nodes)
+     * @param materialIndex The index of the material to use (must be valid in model's material array)
+     */
+    public setMaterial(nodeName: string, materialIndex: number): void {
+        this._manager.setInstanceMaterial(this, nodeName, materialIndex);
+    }
+
+    /**
+     * Resets all material overrides for this instance, reverting to the model's default materials.
+     */
+    public resetMaterials(): void {
+        this._instanceData.materialOverrides.clear();
+    }
+
 }

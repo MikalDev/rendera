@@ -105,6 +105,7 @@ export interface InstanceData {
     allNodesDisabled: boolean;
     tintColor: [number, number, number];
     opacity: number;
+    materialOverrides: Map<string, number>;
 }
 export interface IModelLoader {
     hasModel(modelId: ModelId): boolean;
@@ -128,6 +129,7 @@ export interface IInstanceManager {
     markInstanceDirty(instanceId: number): void;
     invalidateAnimationCache(instanceId: number): void;
     enableModelNode(nodeName: string, instance: Model): void;
+    setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void;
     renderShadowMapInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
         view: mat4;
         projection: mat4;

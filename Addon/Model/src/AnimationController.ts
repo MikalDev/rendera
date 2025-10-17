@@ -19,6 +19,7 @@ export class AnimationController {
     private animationCallbacks: Map<number, AnimationEventCallback> = new Map();
     private previousAnimationTimes: Map<number, number> = new Map();
     private previousAnimationNames: Map<number, string | null> = new Map();
+    private instanceSequence = new Map<number, number>();
     
     constructor(private modelLoader: ModelLoader) {
         this.modelLoader = modelLoader;
@@ -188,7 +189,7 @@ export class AnimationController {
         const animationState = instance.animationState;
         const currentAnimation = animationState.currentAnimation;
         const playing = animationState.playing;
-        
+
         // Check for animation start event
         const previousAnimation = this.previousAnimationNames.get(instanceId);
         if (currentAnimation && currentAnimation !== previousAnimation && playing) {
@@ -229,6 +230,11 @@ export class AnimationController {
         );
         instance.animationState.currentTime = newTime;
 
+        // Increment sequence for this frame's computation
+        // This prevents stale worker results from being applied (bugs #2 and #3)
+        const currentSeq = (this.instanceSequence.get(instanceId) || 0) + 1;
+        this.instanceSequence.set(instanceId, currentSeq);
+
         // Use worker for full animation pipeline if enabled
         if (this.useWorker && this.workerManager) {
             // Check if model is ready in worker
@@ -262,9 +268,12 @@ export class AnimationController {
                     blendSource,
                     blendDuration,
                     (result) => {
-                        // Apply results when they arrive
-                        this.applyWorkerResults(instance, result, modelData);
-                        this.updateInstanceCache(instance);
+                        // Only apply if this is still the latest sequence (not stale)
+                        // This prevents race conditions and main thread fallback overwrites
+                        if (this.instanceSequence.get(instanceId) === currentSeq) {
+                            this.applyWorkerResults(instance, result, modelData);
+                            this.updateInstanceCache(instance);
+                        }
                     }
                 );
                 
@@ -764,15 +773,15 @@ export class AnimationController {
 
     stopAnimation(instance: InstanceData): void {
         const previousAnimation = instance.animationState.currentAnimation;
-        
+
         instance.animationState.playing = false;
         instance.animationState.currentAnimation = null;
         instance.animationState.currentTime = 0;
-        
+
         // Clear blend state
         instance.animationState.blendSource = undefined;
         instance.animationState.blendDuration = undefined;
-        
+
         // Fire stop event if there was an animation playing
         if (previousAnimation) {
             this.fireAnimationEvent(
@@ -784,11 +793,12 @@ export class AnimationController {
                 instance.instanceId.modelId
             );
         }
-        
+
         // Clear tracking for this instance
         this.previousAnimationNames.delete(instance.instanceId.id);
         this.previousAnimationTimes.delete(instance.instanceId.id);
-        
+        this.instanceSequence.delete(instance.instanceId.id);
+
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
     }
@@ -796,6 +806,7 @@ export class AnimationController {
     // Public method to invalidate cache for a specific instance
     public invalidateCache(instanceId: number): void {
         this.instanceCache.delete(instanceId);
+        this.instanceSequence.delete(instanceId);
     }
     
     // Animation event callback registration
@@ -807,6 +818,7 @@ export class AnimationController {
         this.animationCallbacks.delete(instanceId);
         this.previousAnimationTimes.delete(instanceId);
         this.previousAnimationNames.delete(instanceId);
+        this.instanceSequence.delete(instanceId);
     }
     
     private fireAnimationEvent(

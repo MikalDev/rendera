@@ -14124,11 +14124,9 @@ class ModelLoader {
             this.processJoints(document, modelData)
         ]);
         */
-        this.gpuResources.gpuResourceCache.cacheModelMode();
         // Process each component sequentially for easier debugging
         await this.processJoints(document, modelData);
         await this.processRenderableNodes(document, modelData);
-        this.gpuResources.gpuResourceCache.restoreModelMode();
         await this.processMaterials(document, modelData);
         await this.processAnimations(document, modelData);
         return modelData;
@@ -14911,8 +14909,20 @@ class WebGLStateTracker {
                 original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
             }
         }
-        // Restore program without validation - trust that programs are valid
-        original.useProgram(snapshot.currentProgram || null);
+        // Restore program with validation - only restore if valid
+        if (snapshot.currentProgram) {
+            const isValidProgram = gl.isProgram(snapshot.currentProgram);
+            if (!isValidProgram) {
+                console.error('[WebGLStateTracker] Invalid shader program detected during restore - skipping restoration:', snapshot.currentProgram);
+                original.useProgram(null); // Unbind program instead of using invalid one
+            }
+            else {
+                original.useProgram(snapshot.currentProgram);
+            }
+        }
+        else {
+            original.useProgram(null);
+        }
         // Restore viewport and scissor
         original.viewport(...snapshot.viewport);
         original.scissor(...snapshot.scissorBox);
@@ -14953,8 +14963,11 @@ class WebGLStateTracker {
                 original.pixelStorei(pname, value);
             }
         }
-        // Update internal state
-        this.state = this.snapshot(); // Re-snapshot to update internal state
+        // CRITICAL: Synchronize tracker's internal state with the snapshot
+        // Without this, the tracker state becomes desynchronized from actual GL state
+        // because restore() uses original methods which bypass the monkeypatch
+        // snapshot() creates deep copies of Maps and arrays, so direct assignment is safe
+        this.state = snapshot;
     }
     /**
      * Get the current state
@@ -15005,45 +15018,6 @@ class GPUResourceCache {
             this.cachedModelState = tracker.snapshot();
             return;
         }
-        // Fallback to old implementation if tracker not available
-        // console.log('[rendera] GPUResourceCache: cacheModelMode (fallback)');
-        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
-        // Get currently bound VAO
-        const vao = this.gl.getParameter(this.gl.VERTEX_ARRAY_BINDING);
-
-        // Get currently bound texture
-        const textureBinding = this.gl.getParameter(this.gl.TEXTURE_BINDING_2D);
-
-        // Get current shader program
-        const shaderProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
-
-        // Get current element array buffer
-        const elementArrayBuffer = this.gl.getParameter(this.gl.ELEMENT_ARRAY_BUFFER_BINDING);
-
-        // Get active texture unit
-        const activeTexture = this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
-
-        // Get array buffer binding
-        const arrayBuffer = this.gl.getParameter(this.gl.ARRAY_BUFFER_BINDING);
-
-        // Get uniform buffer bindings for tracked binding points
-        const uniformBufferBindings: (WebGLBuffer | null)[] = [];
-        for (const bindingPoint of GPUResourceCache.TRACKED_UBO_BINDING_POINTS) {
-            const buffer = this.gl.getIndexedParameter(this.gl.UNIFORM_BUFFER_BINDING, bindingPoint);
-            uniformBufferBindings.push(buffer);
-        }
-
-        this.cachedState = {
-            vao,
-            textureBinding,
-            shaderProgram,
-            elementArrayBuffer,
-            activeTexture,
-            arrayBuffer,
-            uniformBufferBindings
-        };
-        //console.log('[rendera] GPUResourceCache: cachedState', this.cachedState);
-        */
     }
     restoreModelMode() {
         // New implementation using WebGLStateTracker
@@ -15057,62 +15031,47 @@ class GPUResourceCache {
             this.cachedModelState = null;
             return;
         }
-        // Fallback to old implementation if tracker not available
-        // console.log('[rendera] GPUResourceCache: restoreModelMode (fallback)');
-        /* OLD IMPLEMENTATION - KEPT FOR REFERENCE
-        if (this.cachedState) {
-            // console.log('[rendera] GPUResourceCache: restoreModelMode', this.cachedState);
-
-            // First, clean up any texture bindings we might have created on units 1-17
-            // This ensures C3 doesn't encounter unexpected textures
-            this.cleanupTextureUnits();
-
-            // Restore active texture unit first (before binding textures)
-            this.gl.activeTexture(this.cachedState.activeTexture);
-
-            // Restore original 4 states
-            this.gl.bindVertexArray(this.cachedState.vao);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, this.cachedState.textureBinding);
-            this.gl.useProgram(this.cachedState.shaderProgram);
-            this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.cachedState.elementArrayBuffer);
-
-            // Restore additional states
-            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.cachedState.arrayBuffer);
-
-            // Restore uniform buffer bindings
-            for (let i = 0; i < this.cachedState.uniformBufferBindings.length; i++) {
-                const bindingPoint = GPUResourceCache.TRACKED_UBO_BINDING_POINTS[i];
-                const buffer = this.cachedState.uniformBufferBindings[i];
-                if (buffer !== undefined) {
-                    this.gl.bindBufferBase(this.gl.UNIFORM_BUFFER, bindingPoint, buffer);
-                }
-            }
-
-            // Clear cached state after restoration
-            this.cachedState = null;
-        }
-        */
     }
     /**
      * Clean up texture bindings on units we use (1-17) to avoid conflicts with C3
      * We skip unit 0 as it will be restored from cached state
+     *
+     * IMPORTANT: Uses original GL methods (via tracker) to avoid polluting tracker state
+     * before restore() syncs it back to the snapshot.
      */
     cleanupTextureUnits() {
-        var _a, _b, _c, _d;
-        // Use cached activeTexture from new state, fallback to old state, or query GL
-        const currentActiveTexture = (_d = (_b = (_a = this.cachedModelState) === null || _a === void 0 ? void 0 : _a.activeTexture) !== null && _b !== void 0 ? _b : (_c = this.cachedState) === null || _c === void 0 ? void 0 : _c.activeTexture) !== null && _d !== void 0 ? _d : this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
-        // Clean material texture units (1-4)
+        var _a, _b, _c, _d, _e, _f, _g, _h;
+        // Get the WebGLStateTracker to access original methods
+        const tracker = WebGLStateTracker.getInstance();
+        if (!tracker) {
+            // Fallback: use regular GL methods if tracker not available
+            const currentActiveTexture = (_d = (_b = (_a = this.cachedModelState) === null || _a === void 0 ? void 0 : _a.activeTexture) !== null && _b !== void 0 ? _b : (_c = this.cachedState) === null || _c === void 0 ? void 0 : _c.activeTexture) !== null && _d !== void 0 ? _d : this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+            for (let unit = 1; unit <= 4; unit++) {
+                this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            }
+            for (let unit = 10; unit <= 17; unit++) {
+                this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+                this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            }
+            this.gl.activeTexture(currentActiveTexture);
+            return;
+        }
+        // Use original methods to avoid updating tracker state
+        const original = tracker.getOriginalMethods();
+        const currentActiveTexture = (_h = (_f = (_e = this.cachedModelState) === null || _e === void 0 ? void 0 : _e.activeTexture) !== null && _f !== void 0 ? _f : (_g = this.cachedState) === null || _g === void 0 ? void 0 : _g.activeTexture) !== null && _h !== void 0 ? _h : this.gl.getParameter(this.gl.ACTIVE_TEXTURE);
+        // Clean material texture units (1-4) using original methods
         for (let unit = 1; unit <= 4; unit++) {
-            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            original.activeTexture(this.gl.TEXTURE0 + unit);
+            original.bindTexture(this.gl.TEXTURE_2D, null);
         }
-        // Clean shadow map texture units (10-17)
+        // Clean shadow map texture units (10-17) using original methods
         for (let unit = 10; unit <= 17; unit++) {
-            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+            original.activeTexture(this.gl.TEXTURE0 + unit);
+            original.bindTexture(this.gl.TEXTURE_2D, null);
         }
-        // Restore the active texture unit
-        this.gl.activeTexture(currentActiveTexture);
+        // Restore the active texture unit using original method
+        original.activeTexture(currentActiveTexture);
     }
     /**
      * Cache the current GL state before shadow map rendering.
@@ -15196,7 +15155,16 @@ class GPUResourceCache {
             else {
                 this.gl.disable(this.gl.BLEND);
             }
-            this.gl.useProgram(this.tempShadowState.currentProgram);
+            // Validate program before restoring - only restore if valid
+            if (this.tempShadowState.currentProgram && this.gl.isProgram(this.tempShadowState.currentProgram)) {
+                this.gl.useProgram(this.tempShadowState.currentProgram);
+            }
+            else {
+                if (this.tempShadowState.currentProgram) {
+                    console.error('[GPUResourceCache] Invalid shader program detected during restore - skipping restoration');
+                }
+                this.gl.useProgram(null); // Unbind program instead of using invalid one
+            }
             this.gl.clearColor(this.tempShadowState.colorClearValue[0], this.tempShadowState.colorClearValue[1], this.tempShadowState.colorClearValue[2], this.tempShadowState.colorClearValue[3]);
             this.gl.clearDepth(this.tempShadowState.depthClearValue);
             // Clear temp state after restore to prevent stale references
@@ -15954,7 +15922,7 @@ class GPUResourceManager {
     }
     bindShaderAndMaterial(shader, materialIndex, modelData) {
         const materialSystem = modelData.materialSystem;
-        this.gl.useProgram(shader);
+        // Shader is already bound by caller - no need to bind again
         this.updateCameraPositionUniforms(shader);
         this.updateLightUniforms(shader);
         this.updateGIUniforms(shader);
@@ -16005,42 +15973,15 @@ class GPUResourceManager {
         }
     }
     /**
-     * @deprecated Use setMultipleShadowMapUniforms instead
-     */
-    setShadowMapUniforms(shader, enabled, shadowMap = null, lightViewProjection = null, bias = 0.001) {
-        this.gl.useProgram(shader);
-        const useShadowMapLoc = this.uniformCache.getLocation(shader, 'u_UseShadowMap');
-        if (useShadowMapLoc) {
-            this.gl.uniform1i(useShadowMapLoc, enabled ? 1 : 0);
-        }
-        if (enabled && shadowMap && lightViewProjection) {
-            // Use texture unit 10 for shadow map
-            this.gl.activeTexture(this.gl.TEXTURE10); // Changed from TEXTURE7
-            // Clear any existing texture bindings to prevent type conflicts with C3
-            this.gl.bindTexture(this.gl.TEXTURE_2D, null);
-            this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
-            this.gl.bindTexture(this.gl.TEXTURE_2D_ARRAY, null);
-            this.gl.bindTexture(this.gl.TEXTURE_3D, null);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowMap);
-            const shadowMapLoc = this.uniformCache.getLocation(shader, 'u_ShadowMap');
-            if (shadowMapLoc) {
-                this.gl.uniform1i(shadowMapLoc, 10); // Tell shader to use texture unit 10
-            }
-            const lightVPLoc = this.uniformCache.getLocation(shader, 'u_LightViewProjection');
-            if (lightVPLoc) {
-                this.gl.uniformMatrix4fv(lightVPLoc, false, lightViewProjection);
-            }
-            const biasLoc = this.uniformCache.getLocation(shader, 'u_ShadowBias');
-            if (biasLoc) {
-                this.gl.uniform1f(biasLoc, bias);
-            }
-        }
-    }
-    /**
      * Sets uniforms for multiple shadow maps using data from ShadowMapManager.
      * This method replaces setShadowMapUniforms for the new multi-shadow architecture.
      */
     setMultipleShadowMapUniforms(shader, shadowMapManager, bias = 0.001) {
+        // Validate shader program before using it
+        if (!this.gl.isProgram(shader)) {
+            console.error('[GPUResourceManager] Invalid shader program provided to setMultipleShadowMapUniforms');
+            return;
+        }
         this.gl.useProgram(shader);
         // Get active shadow map data
         const activeShadowMapIndices = shadowMapManager.getActiveShadowMapIndices();
@@ -16243,16 +16184,6 @@ class ShaderSystem {
         this.programs.set(name, program);
         return program;
     }
-    useProgram(name) {
-        const program = this.programs.get(name);
-        if (!program) {
-            throw this.createError(ModelErrorCode.RESOURCE_NOT_FOUND, `Shader program '${name}' not found`);
-        }
-        if (this.currentProgram !== program) {
-            this.gl.useProgram(program);
-            this.currentProgram = program;
-        }
-    }
     compileProgram(vertexSource, fragmentSource) {
         const vertexShader = this.compileShader(vertexSource, this.gl.VERTEX_SHADER);
         const fragmentShader = this.compileShader(fragmentSource, this.gl.FRAGMENT_SHADER);
@@ -16448,6 +16379,20 @@ class Model {
     setOpacity(opacity) {
         this._instanceData.opacity = Math.max(0, Math.min(1, opacity));
         this._manager.markInstanceDirty(this.instanceId.id);
+    }
+    /**
+     * Sets the material for a specific node (and all its primitives).
+     * @param nodeName The name of the node (or 'node_<index>' for unnamed nodes)
+     * @param materialIndex The index of the material to use (must be valid in model's material array)
+     */
+    setMaterial(nodeName, materialIndex) {
+        this._manager.setInstanceMaterial(this, nodeName, materialIndex);
+    }
+    /**
+     * Resets all material overrides for this instance, reverting to the model's default materials.
+     */
+    resetMaterials() {
+        this._instanceData.materialOverrides.clear();
     }
 }
 
@@ -16827,6 +16772,7 @@ class AnimationController {
         this.animationCallbacks = new Map();
         this.previousAnimationTimes = new Map();
         this.previousAnimationNames = new Map();
+        this.instanceSequence = new Map();
         this.modelLoader = modelLoader;
     }
     async setUseWorker(enabled) {
@@ -16996,6 +16942,10 @@ class AnimationController {
         // Update animation time
         const newTime = this.updateTime(instance.animationState, deltaTime, maxDuration, instance.instanceId.id, currentAnimation, instance.instanceId.modelId);
         instance.animationState.currentTime = newTime;
+        // Increment sequence for this frame's computation
+        // This prevents stale worker results from being applied (bugs #2 and #3)
+        const currentSeq = (this.instanceSequence.get(instanceId) || 0) + 1;
+        this.instanceSequence.set(instanceId, currentSeq);
         // Use worker for full animation pipeline if enabled
         if (this.useWorker && this.workerManager) {
             // Check if model is ready in worker
@@ -17017,9 +16967,12 @@ class AnimationController {
                 }
                 // Fire-and-forget request with callback
                 this.workerManager.requestAnimation(instance.instanceId.id, instance.instanceId.modelId, currentAnimation, newTime, animationState.loop, ((_b = modelData === null || modelData === void 0 ? void 0 : modelData.jointData) === null || _b === void 0 ? void 0 : _b.length) > 0, blendSource, blendDuration, (result) => {
-                    // Apply results when they arrive
-                    this.applyWorkerResults(instance, result, modelData);
-                    this.updateInstanceCache(instance);
+                    // Only apply if this is still the latest sequence (not stale)
+                    // This prevents race conditions and main thread fallback overwrites
+                    if (this.instanceSequence.get(instanceId) === currentSeq) {
+                        this.applyWorkerResults(instance, result, modelData);
+                        this.updateInstanceCache(instance);
+                    }
                 });
                 // Return immediately - worker will handle it
                 return;
@@ -17419,12 +17372,14 @@ class AnimationController {
         // Clear tracking for this instance
         this.previousAnimationNames.delete(instance.instanceId.id);
         this.previousAnimationTimes.delete(instance.instanceId.id);
+        this.instanceSequence.delete(instance.instanceId.id);
         // Invalidate cache for this instance
         this.instanceCache.delete(instance.instanceId.id);
     }
     // Public method to invalidate cache for a specific instance
     invalidateCache(instanceId) {
         this.instanceCache.delete(instanceId);
+        this.instanceSequence.delete(instanceId);
     }
     // Animation event callback registration
     registerAnimationCallback(instanceId, callback) {
@@ -17434,6 +17389,7 @@ class AnimationController {
         this.animationCallbacks.delete(instanceId);
         this.previousAnimationTimes.delete(instanceId);
         this.previousAnimationNames.delete(instanceId);
+        this.instanceSequence.delete(instanceId);
     }
     fireAnimationEvent(instanceId, eventType, animationName, currentTime, duration, modelId) {
         const callback = this.animationCallbacks.get(instanceId);
@@ -18669,7 +18625,8 @@ class InstanceManager {
             disabledNodes: new Set(),
             allNodesDisabled: false,
             tintColor: [1, 1, 1], // Default white tint (no tinting)
-            opacity: 1 // Default fully opaque
+            opacity: 1, // Default fully opaque
+            materialOverrides: new Map() // Material overrides per primitive
         };
         // Store instance
         this.instances.set(instanceId.id, instanceData);
@@ -18703,6 +18660,10 @@ class InstanceManager {
         }
         if (tick !== undefined) {
             this.lastRenderTick = tick;
+        }
+        // Early exit if there are no instances to render
+        if (this.instances.size === 0) {
+            return;
         }
         // Render each model group
         // @ts-ignore
@@ -18818,12 +18779,12 @@ class InstanceManager {
         return isVisible;
     }
     renderModelInstances(modelId, instanceGroup, viewProjection) {
-        var _a;
+        var _a, _b;
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData)
             return;
-        // Basic shader setup TODO: move to GPUResourceManager
-        this.gl.useProgram(this.defaultShaderProgram);
+        // Shader is already bound by setMultipleShadowMapUniforms in the render() function
+        // No need to bind it again here
         // For each instance
         for (const instanceId of instanceGroup) {
             const instance = this.instances.get(instanceId);
@@ -18850,17 +18811,19 @@ class InstanceManager {
                     continue; // Skip rendering this node
                 }
                 const mesh = renderableNode.modelMesh;
-                for (const primitive of mesh.primitives) {
-                    // const material = modelData.materials[primitive.material];
+                for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex++) {
+                    const primitive = mesh.primitives[primitiveIndex];
+                    // Check for material override for this instance
+                    const primitiveKey = `${renderableNode.node.indexData.nodeIndex}_${primitiveIndex}`;
+                    const materialIndex = (_b = instance.materialOverrides.get(primitiveKey)) !== null && _b !== void 0 ? _b : primitive.material;
+                    // const material = modelData.materials[materialIndex];
                     // const shader = material.program;
                     // TODO: move to GPUResourceManager
                     const shader = this.defaultShaderProgram;
-                    // 1. Bind shader
-                    // TODO: move to GPUResourceManager
-                    this.gl.useProgram(shader);
-                    // 2. Bind VAO (contains vertex attributes setup)
+                    // Shader is already bound - no need to bind again
+                    // 1. Bind VAO (contains vertex attributes setup)
                     this.gl.bindVertexArray(primitive.vao);
-                    // 3. Set required uniforms using cached locations
+                    // 2. Set required uniforms using cached locations
                     const viewLoc = this.uniformCache.getLocation(shader, 'u_View');
                     const projectionLoc = this.uniformCache.getLocation(shader, 'u_Projection');
                     const modelLoc = this.uniformCache.getLocation(shader, 'u_Model');
@@ -18920,13 +18883,14 @@ class InstanceManager {
                     }
                     const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
                     this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);
-                    // 5. Bind material properties (textures and uniforms)
-                    this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, primitive.material, modelData);
-                    // 6. Handle winding order for coordinate conversion
+                    // 3. Bind material properties (textures and uniforms)
+                    // Use materialIndex which may be overridden per instance
+                    this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, materialIndex, modelData);
+                    // 4. Handle winding order for coordinate conversion
                     // Since we flip Y and Z axes (2 flips), triangle winding is reversed
                     // Switch from CCW (default) to CW for proper culling
                     this.gl.frontFace(this.gl.CW);
-                    // 7. Draw
+                    // 5. Draw
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
                     }
@@ -19108,6 +19072,47 @@ class InstanceManager {
     // Removed - Model handles these directly
     get animationController() {
         return this._animationController;
+    }
+    /**
+     * Sets the material for a specific node (and all its primitives).
+     * @param instance The model instance
+     * @param nodeName The name of the node
+     * @param materialIndex The material index to use
+     */
+    setInstanceMaterial(instance, nodeName, materialIndex) {
+        const instanceData = this.instances.get(instance.instanceId.id);
+        if (!instanceData) {
+            console.warn(`[InstanceManager] Instance ${instance.instanceId.id} not found`);
+            return;
+        }
+        const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
+        if (!modelData) {
+            console.warn(`[InstanceManager] Model data not found for ${instance.instanceId.modelId}`);
+            return;
+        }
+        // Validate material index
+        const materials = modelData.materialSystem.materials;
+        if (materialIndex < 0 || materialIndex >= materials.size) {
+            console.warn(`[InstanceManager] Invalid material index ${materialIndex}. Model has ${materials.size} materials.`);
+            return;
+        }
+        // Find the node by name
+        const extendedNode = modelData.nodeNameMap.get(nodeName);
+        if (!extendedNode) {
+            console.warn(`[InstanceManager] Node "${nodeName}" not found in model`);
+            return;
+        }
+        // Set material for all primitives in this node
+        for (const renderableNode of modelData.renderableNodes) {
+            if (renderableNode.node === extendedNode) {
+                const nodeIndex = renderableNode.node.indexData.nodeIndex;
+                for (let primitiveIndex = 0; primitiveIndex < renderableNode.modelMesh.primitives.length; primitiveIndex++) {
+                    const primitiveKey = `${nodeIndex}_${primitiveIndex}`;
+                    instanceData.materialOverrides.set(primitiveKey, materialIndex);
+                }
+                break;
+            }
+        }
     }
 }
 // @ts-ignore

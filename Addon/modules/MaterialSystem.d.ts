@@ -1,7 +1,7 @@
 import { MaterialData } from './types';
 export declare class MaterialSystem {
     private gl;
-    private materials;
+    materials: Map<number, MaterialData>;
     private currentMaterial;
     private samplerTextureUnitMap;
     private uniformCache;

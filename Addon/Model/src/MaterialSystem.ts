@@ -4,7 +4,7 @@ import { ShaderUniformCache } from './ShaderUniformCache';
 // MaterialSystem for handling materials and shaders
 export class MaterialSystem {
     private gl: WebGL2RenderingContext;
-    private materials: Map<number, MaterialData>;
+    public materials: Map<number, MaterialData>;
     private currentMaterial: number | null = null;
     private samplerTextureUnitMap: Record<string, number>;
     private uniformCache: ShaderUniformCache;

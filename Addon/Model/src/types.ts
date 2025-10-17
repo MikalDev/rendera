@@ -171,6 +171,8 @@ export interface InstanceData {
     allNodesDisabled: boolean;
     tintColor: [number, number, number]; // RGB 0-1
     opacity: number; // 0-1
+    // Maps a unique primitive identifier (nodeIndex_primitiveIndex) to material index
+    materialOverrides: Map<string, number>;
 }
 
 // Main class interfaces
@@ -196,14 +198,17 @@ export interface IInstanceManager {
     updateModelAnimation(instance: Model, deltaTime: number): void;
     setModelBindPose(instance: Model): void;
     startAnimation(instance: Model, animationName: string, options?: AnimationOptions): void;
-    
+
     // Helper methods for Model class
     markInstanceDirty(instanceId: number): void;
     invalidateAnimationCache(instanceId: number): void;
-    
+
     // Complex node operations that need model data access
     enableModelNode(nodeName: string, instance: Model): void;
-    
+
+    // Material switching
+    setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void;
+
     // Rendering (internal use)
     renderShadowMapInstances(
         modelId: string,

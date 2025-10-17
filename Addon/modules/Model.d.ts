@@ -56,5 +56,15 @@ export declare class Model implements IModel {
      * @param opacity Opacity value (0-1, where 0 is transparent and 1 is opaque)
      */
     setOpacity(opacity: number): void;
+    /**
+     * Sets the material for a specific node (and all its primitives).
+     * @param nodeName The name of the node (or 'node_<index>' for unnamed nodes)
+     * @param materialIndex The index of the material to use (must be valid in model's material array)
+     */
+    setMaterial(nodeName: string, materialIndex: number): void;
+    /**
+     * Resets all material overrides for this instance, reverting to the model's default materials.
+     */
+    resetMaterials(): void;
 }
 //# sourceMappingURL=Model.d.ts.map

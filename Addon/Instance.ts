@@ -51,11 +51,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		// Initialize WebGL state tracker
 		this.webGLStateTracker = WebGLStateTracker.initialize(gl);
 		console.info('[rendera] WebGL state tracker initialized', this.webGLStateTracker);
-
-		// Take initial snapshot
-		const initialSnapshot = this.webGLStateTracker.snapshot();
-		console.log('[rendera] Initial WebGL state snapshot:', this.webGLStateTracker.snapshotToLoggable(initialSnapshot));
-
+		
 		// Make state tracker available globally for debugging
 		// @ts-ignore
 		globalThis.renderaWebGLState = {
@@ -65,7 +61,6 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 			original: this.webGLStateTracker.getOriginalMethods(),
 			snapshotToLoggable: (snapshot: any) => this.webGLStateTracker.snapshotToLoggable(snapshot),
 			verifyMonkeypatch: () => this.webGLStateTracker.verifyMonkeypatch(),
-			initialSnapshot: initialSnapshot
 		};
 
 		// Initialize managers

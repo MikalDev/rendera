@@ -8,6 +8,7 @@ export declare class AnimationController {
     private animationCallbacks;
     private previousAnimationTimes;
     private previousAnimationNames;
+    private instanceSequence;
     constructor(modelLoader: ModelLoader);
     setUseWorker(enabled: boolean): Promise<void>;
     cacheModelInWorker(modelId: string): Promise<void>;

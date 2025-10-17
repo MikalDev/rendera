@@ -70,5 +70,12 @@ export declare class InstanceManager implements IInstanceManager {
     getShadowMapManager(): ShadowMapManager;
     enableModelNode(nodeName: string, instance: Model): void;
     get animationController(): AnimationController;
+    /**
+     * Sets the material for a specific node (and all its primitives).
+     * @param instance The model instance
+     * @param nodeName The name of the node
+     * @param materialIndex The material index to use
+     */
+    setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map
