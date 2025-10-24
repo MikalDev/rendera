@@ -18684,6 +18684,9 @@ class InstanceManager {
         if (this.shadowMapManager) {
             this.gpuResources.setMultipleShadowMapUniforms(this.defaultShaderProgram, this.shadowMapManager);
         }
+        // Ensure color writes are enabled for main scene rendering
+        // C3's renderer may have colorMask disabled from previous operations
+        this.gl.colorMask(true, true, true, true);
         // Update frustum from view-projection matrices
         this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
         for (const [modelId, instanceGroup] of this.instancesByModel) {
