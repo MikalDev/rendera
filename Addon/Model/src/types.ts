@@ -6,6 +6,7 @@ import { Node, Animation, Scene, Document as gltfDocument } from '@gltf-transfor
 
 import { mat4, vec3, vec4 } from 'gl-matrix';
 import { MaterialSystem } from './MaterialSystem';
+import { WebGLState } from './WebGLStateTracker';
 
 export const MAX_BONES = 256;
 
@@ -189,8 +190,7 @@ export interface IModelLoader {
 export interface IGPUResourceCache {
     cacheModelMode(): void;
     restoreModelMode(): void;
-    cacheShadowMapState(): void;
-    restoreShadowMapState(): void;
+    getCachedModelState(): WebGLState | null;
 }
 
 export interface IInstanceManager {

@@ -185,6 +185,7 @@ export class WebGLStateTracker {
             frontFace: gl.frontFace.bind(gl),
             polygonOffset: gl.polygonOffset.bind(gl),
             pixelStorei: gl.pixelStorei.bind(gl),
+            deleteFramebuffer: gl.deleteFramebuffer.bind(gl),
         };
 
         this.applyMonkeypatch();
@@ -271,6 +272,22 @@ export class WebGLStateTracker {
         (gl as any).useProgram = (program: WebGLProgram | null) => {
             state.currentProgram = program;
             return original.useProgram(program);
+        };
+
+        (gl as any).deleteFramebuffer = (framebuffer: WebGLFramebuffer | null) => {
+            // Clear all framebuffer bindings that match the deleted framebuffer
+            // This prevents trying to restore a deleted framebuffer later
+            if (state.boundFramebuffer === framebuffer) {
+                state.boundFramebuffer = null;
+            }
+            if (state.boundReadFramebuffer === framebuffer) {
+                state.boundReadFramebuffer = null;
+            }
+            if (state.boundDrawFramebuffer === framebuffer) {
+                state.boundDrawFramebuffer = null;
+            }
+
+            return original.deleteFramebuffer(framebuffer);
         };
 
         (gl as any).viewport = (x: number, y: number, width: number, height: number) => {

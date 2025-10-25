@@ -1,6 +1,8 @@
 import { mat4, vec3 } from 'gl-matrix';
 import type { Light, DirectionalLight, SpotLight, IGPUResourceManager } from './types';
 import type { InstanceManager } from './InstanceManager';
+import type { WebGLState } from './WebGLStateTracker';
+import { WebGLStateTracker } from './WebGLStateTracker';
 
 const SHADOW_MAP_CONSTANTS = {
     MIN_RESOLUTION: 128,
@@ -767,39 +769,47 @@ export class ShadowMapManager {
     }
 
     /**
-     * Begins a shadow map rendering frame.
-     * Caches GL state once for the entire shadow rendering pass.
+     * Prepares GL state for normal rendering after shadow map rendering.
+     * Restores the complete GL state that was cached before shadow 
+     * @param cachedState The cached C3 GL state to restore
      */
-    private beginShadowMapFrame(): void {
-        // Cache GL state once at the beginning of the frame
-        this.gpuResourceManager.gpuResourceCache.cacheShadowMapState();
+    public prepareForNormalRendering(cachedState: WebGLState | null): void {
+        if (!cachedState) {
+            console.warn('[ShadowMapManager] prepareForNormalRendering called without cached state - cannot restore GL state');
+            // At minimum, unbind framebuffer to prevent feedback loop
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+            return;
+        }
+
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker) {
+            tracker.restore(cachedState);
+
+            this.gl.colorMask(true, true, true, true);
+        } else {
+            console.error('[ShadowMapManager] WebGLStateTracker not available - GL state cannot be restored properly');
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+        }
     }
 
-    /**
-     * Ends a shadow map rendering frame.
-     * Restores the cached GL state after all shadow maps are rendered.
-     */
-    private endShadowMapFrame(): void {
-        // Restore GL state once at the end of the frame
-        this.gpuResourceManager.gpuResourceCache.restoreShadowMapState();
-    }
 
     /**
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
      * @param lights - Optional array of lights to check for shadow casting (for early exit optimization)
+     * @returns true if shadows were actually rendered, false if skipped
      */
-    renderAllShadowMaps(instanceManager: InstanceManager, lights?: Light[]): void {
+    renderAllShadowMaps(instanceManager: InstanceManager, lights?: Light[]): boolean {
         // Ultra-fast early exit: if lights array is provided, check if ANY light casts shadows
         // This avoids even checking the shadowMaps collection if no lights will cast shadows
         if (lights && !this.hasAnyShadowCastingLights(lights)) {
-            return; // No lights cast shadows - skip EVERYTHING including state checks
+            return false; // No lights cast shadows - skip EVERYTHING including state checks
         }
 
         // Early exit if no shadow maps have been created
         if (this.shadowMaps.size === 0) {
-            return; // Skip entire shadow map stage including state store/restore
+            return false; // Skip entire shadow map stage including state store/restore
         }
 
         // Check if any enabled lights need rendering
@@ -813,23 +823,19 @@ export class ShadowMapManager {
 
         // Skip if no enabled shadow-casting lights
         if (!hasEnabledShadows) {
-            return; // Bypass shadow state store/restore entirely
+            return false;
         }
 
-        // Cache GL state once for all shadow maps
-        this.beginShadowMapFrame();
-
-        try {
-            // For each light that casts shadows
-            for (const [lightId, shadowData] of this.shadowMaps) {
-                if (shadowData.light.enabled && shadowData.light.castShadows) {
-                    this.renderShadowMapInternal(lightId, instanceManager);
-                }
+        // Render all shadow maps
+        // Note: GL state is managed at frame level by InstanceManager
+        // prepareForNormalRendering() will transition state back after shadow rendering
+        for (const [lightId, shadowData] of this.shadowMaps) {
+            if (shadowData.light.enabled && shadowData.light.castShadows) {
+                this.renderShadowMapInternal(lightId, instanceManager);
             }
-        } finally {
-            // Restore GL state once after all shadow maps
-            this.endShadowMapFrame();
         }
+
+        return true; // Shadows were rendered
     }
 
     /**
@@ -869,11 +875,7 @@ export class ShadowMapManager {
             throw new Error(`No shadow map data found for light ${lightId}`);
         }
 
-        // Cache GL state for debug rendering (called independently from frame-level management)
-        this.beginShadowMapFrame();
 
-        try {
-        // Set up state for debug rendering
         this.gl.disable(this.gl.DEPTH_TEST);
         this.gl.disable(this.gl.BLEND);
         this.gl.viewport(0, 0, this.resolution, this.resolution);
@@ -945,11 +947,6 @@ export class ShadowMapManager {
         // Restore comparison mode
         this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
-        
-        } finally {
-            // Restore GL state
-            this.endShadowMapFrame();
-        }
     }
 
     /**

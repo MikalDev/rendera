@@ -2,6 +2,7 @@ import { Model } from './Model';
 import { Node, Animation, Scene } from '@gltf-transform/core';
 import { mat4, vec3, vec4 } from 'gl-matrix';
 import { MaterialSystem } from './MaterialSystem';
+import { WebGLState } from './WebGLStateTracker';
 export declare const MAX_BONES = 256;
 export declare const COORDINATE_CONVERSION_MATRIX: mat4;
 export declare function applyCoordinateConversion(sourceMatrix: mat4): mat4;
@@ -119,8 +120,7 @@ export interface IModelLoader {
 export interface IGPUResourceCache {
     cacheModelMode(): void;
     restoreModelMode(): void;
-    cacheShadowMapState(): void;
-    restoreShadowMapState(): void;
+    getCachedModelState(): WebGLState | null;
 }
 export interface IInstanceManager {
     updateModelAnimation(instance: Model, deltaTime: number): void;

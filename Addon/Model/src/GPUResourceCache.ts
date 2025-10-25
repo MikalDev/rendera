@@ -23,8 +23,6 @@ export class GPUResourceCache implements IGPUResourceCache {
     // Track which UBO binding points we care about
     private static readonly TRACKED_UBO_BINDING_POINTS = [0, 1, 2, 3]; // Track first 4 binding points
 
-    // Shadow map state - using WebGLState snapshot for consistency
-    private cachedShadowState: WebGLState | null = null;
 
     constructor(gl: WebGL2RenderingContext) {
         this.gl = gl;
@@ -108,54 +106,11 @@ export class GPUResourceCache implements IGPUResourceCache {
     }
 
     /**
-     * Cache the current GL state before shadow map rendering.
-     * Uses WebGLStateTracker snapshot when available for better performance.
-     */
-    cacheShadowMapState(): void {
-        // Use WebGLStateTracker snapshot with performance optimizations
-        // Skip textures, buffers, and pixel store since shadow rendering doesn't need them
-        const tracker = WebGLStateTracker.getInstance();
-        if (tracker) {
-            this.cachedShadowState = tracker.snapshot({
-                skipTextures: true,
-                skipBuffers: true,
-                skipPixelStore: true
-            });
-        }
-    }
-
-    /**
-     * Restore the cached GL state after shadow map rendering.
-     * Uses WebGLStateTracker for consistent state management.
-     */
-    restoreShadowMapState(): void {
-        const tracker = WebGLStateTracker.getInstance();
-        if (tracker && this.cachedShadowState) {
-            // Restore state with same options used for snapshot
-            tracker.restore(this.cachedShadowState, {
-                skipTextures: true,
-                skipBuffers: true,
-                skipPixelStore: true
-            });
-
-            // Clear cached state after restore to prevent stale references
-            this.cachedShadowState = null;
-        }
-    }
-
-    /**
-     * Get the cached shadow state.
+     * Get the cached model state.
      * Returns the cached WebGLState snapshot if available.
      */
-    getShadowState() {
-        return this.cachedShadowState;
-    }
-
-    /**
-     * Clear the shadow state cache (e.g., on context loss).
-     */
-    clearShadowStateCache(): void {
-        this.cachedShadowState = null;
+    getCachedModelState(): WebGLState | null {
+        return this.cachedModelState;
     }
 
 }

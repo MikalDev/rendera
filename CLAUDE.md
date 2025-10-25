@@ -8,27 +8,13 @@ Rendera is a 3D renderer plugin for Construct 3 with shadow mapping support. The
 
 ## Build Commands
 
-### Full Build Pipeline
+### Production Build
 ```bash
 deno task bp
 ```
 This runs the complete build pipeline: Model module build → Lost build → Post-build processing
 
-### Development Builds
-```bash
-# Watch mode (rebuilds on file changes)
-deno task dev
-
-# Build and serve with hot reload
-deno task serve
-```
-
-### Model Module Only
-```bash
-cd Addon/Model
-npm run build  # One-time build
-npm run watch  # Watch mode
-```
+**IMPORTANT**: Always use `deno task bp` to build the project. This ensures all components are built in the correct order.
 
 ## Testing
 

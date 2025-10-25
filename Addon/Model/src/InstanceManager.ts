@@ -229,11 +229,18 @@ export class InstanceManager implements IInstanceManager {
         }
 
         this.gpuResources.gpuResourceCache.cacheModelMode();
-
         if (this.shadowMapManager) {
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
             // Pass lights array for optimized early exit when no shadows are cast
-            this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
+            const shadowsWereRendered = this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
+
+            // Only prepare GL state if shadows were actually rendered
+            // This avoids unnecessarily modifying GL state when shadows are disabled/skipped
+            if (shadowsWereRendered) {
+                this.shadowMapManager.prepareForNormalRendering(
+                    this.gpuResources.gpuResourceCache.getCachedModelState()
+                );
+            }
         }
 
         // Set multiple shadow map uniforms using new multi-shadow system
@@ -251,27 +258,11 @@ export class InstanceManager implements IInstanceManager {
             );
         }
 
-        // Ensure color writes are enabled for main scene rendering
-        // C3's renderer may have colorMask disabled from previous operations
-        this.gl.colorMask(true, true, true, true);
-
         // Update frustum from view-projection matrices
         this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
 
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
-        }
-
-        if (this.shadowMapManager && this.debugShadowMap) {
-            // Debug the first active shadow map
-            const activeShadowMapIndices = this.shadowMapManager.getActiveShadowMapIndices();
-            if (activeShadowMapIndices.length > 0) {
-                const firstActiveShadowMapIndex = activeShadowMapIndices[0];
-                const lightId = this.shadowMapManager.getShadowMapLightId(firstActiveShadowMapIndex);
-                if (lightId >= 0) {
-                    this.shadowMapManager.renderShadowMapDebug(lightId);
-                }
-            }
         }
 
         this.gpuResources.gpuResourceCache.restoreModelMode();

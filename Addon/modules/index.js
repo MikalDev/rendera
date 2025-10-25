@@ -14604,6 +14604,7 @@ class WebGLStateTracker {
             frontFace: gl.frontFace.bind(gl),
             polygonOffset: gl.polygonOffset.bind(gl),
             pixelStorei: gl.pixelStorei.bind(gl),
+            deleteFramebuffer: gl.deleteFramebuffer.bind(gl),
         };
         this.applyMonkeypatch();
     }
@@ -14684,6 +14685,20 @@ class WebGLStateTracker {
         gl.useProgram = (program) => {
             state.currentProgram = program;
             return original.useProgram(program);
+        };
+        gl.deleteFramebuffer = (framebuffer) => {
+            // Clear all framebuffer bindings that match the deleted framebuffer
+            // This prevents trying to restore a deleted framebuffer later
+            if (state.boundFramebuffer === framebuffer) {
+                state.boundFramebuffer = null;
+            }
+            if (state.boundReadFramebuffer === framebuffer) {
+                state.boundReadFramebuffer = null;
+            }
+            if (state.boundDrawFramebuffer === framebuffer) {
+                state.boundDrawFramebuffer = null;
+            }
+            return original.deleteFramebuffer(framebuffer);
         };
         gl.viewport = (x, y, width, height) => {
             state.viewport = [x, y, width, height];
@@ -15021,8 +15036,6 @@ class GPUResourceCache {
         this.cachedModelState = null;
         // Old implementation kept for reference/comparison
         this.cachedState = null;
-        // Shadow map state - using WebGLState snapshot for consistency
-        this.cachedShadowState = null;
         this.gl = gl;
     }
     cacheModelMode() {
@@ -15088,50 +15101,11 @@ class GPUResourceCache {
         original.activeTexture(currentActiveTexture);
     }
     /**
-     * Cache the current GL state before shadow map rendering.
-     * Uses WebGLStateTracker snapshot when available for better performance.
-     */
-    cacheShadowMapState() {
-        // Use WebGLStateTracker snapshot with performance optimizations
-        // Skip textures, buffers, and pixel store since shadow rendering doesn't need them
-        const tracker = WebGLStateTracker.getInstance();
-        if (tracker) {
-            this.cachedShadowState = tracker.snapshot({
-                skipTextures: true,
-                skipBuffers: true,
-                skipPixelStore: true
-            });
-        }
-    }
-    /**
-     * Restore the cached GL state after shadow map rendering.
-     * Uses WebGLStateTracker for consistent state management.
-     */
-    restoreShadowMapState() {
-        const tracker = WebGLStateTracker.getInstance();
-        if (tracker && this.cachedShadowState) {
-            // Restore state with same options used for snapshot
-            tracker.restore(this.cachedShadowState, {
-                skipTextures: true,
-                skipBuffers: true,
-                skipPixelStore: true
-            });
-            // Clear cached state after restore to prevent stale references
-            this.cachedShadowState = null;
-        }
-    }
-    /**
-     * Get the cached shadow state.
+     * Get the cached model state.
      * Returns the cached WebGLState snapshot if available.
      */
-    getShadowState() {
-        return this.cachedShadowState;
-    }
-    /**
-     * Clear the shadow state cache (e.g., on context loss).
-     */
-    clearShadowStateCache() {
-        this.cachedShadowState = null;
+    getCachedModelState() {
+        return this.cachedModelState;
     }
 }
 // Track which UBO binding points we care about
@@ -17962,36 +17936,43 @@ class ShadowMapManager {
         this.gl.deleteFramebuffer(data.framebuffer);
     }
     /**
-     * Begins a shadow map rendering frame.
-     * Caches GL state once for the entire shadow rendering pass.
+     * Prepares GL state for normal rendering after shadow map rendering.
+     * Restores the complete GL state that was cached before shadow
+     * @param cachedState The cached C3 GL state to restore
      */
-    beginShadowMapFrame() {
-        // Cache GL state once at the beginning of the frame
-        this.gpuResourceManager.gpuResourceCache.cacheShadowMapState();
-    }
-    /**
-     * Ends a shadow map rendering frame.
-     * Restores the cached GL state after all shadow maps are rendered.
-     */
-    endShadowMapFrame() {
-        // Restore GL state once at the end of the frame
-        this.gpuResourceManager.gpuResourceCache.restoreShadowMapState();
+    prepareForNormalRendering(cachedState) {
+        if (!cachedState) {
+            console.warn('[ShadowMapManager] prepareForNormalRendering called without cached state - cannot restore GL state');
+            // At minimum, unbind framebuffer to prevent feedback loop
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+            return;
+        }
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker) {
+            tracker.restore(cachedState);
+            this.gl.colorMask(true, true, true, true);
+        }
+        else {
+            console.error('[ShadowMapManager] WebGLStateTracker not available - GL state cannot be restored properly');
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+        }
     }
     /**
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
      * @param lights - Optional array of lights to check for shadow casting (for early exit optimization)
+     * @returns true if shadows were actually rendered, false if skipped
      */
     renderAllShadowMaps(instanceManager, lights) {
         // Ultra-fast early exit: if lights array is provided, check if ANY light casts shadows
         // This avoids even checking the shadowMaps collection if no lights will cast shadows
         if (lights && !this.hasAnyShadowCastingLights(lights)) {
-            return; // No lights cast shadows - skip EVERYTHING including state checks
+            return false; // No lights cast shadows - skip EVERYTHING including state checks
         }
         // Early exit if no shadow maps have been created
         if (this.shadowMaps.size === 0) {
-            return; // Skip entire shadow map stage including state store/restore
+            return false; // Skip entire shadow map stage including state store/restore
         }
         // Check if any enabled lights need rendering
         let hasEnabledShadows = false;
@@ -18003,22 +17984,17 @@ class ShadowMapManager {
         }
         // Skip if no enabled shadow-casting lights
         if (!hasEnabledShadows) {
-            return; // Bypass shadow state store/restore entirely
+            return false;
         }
-        // Cache GL state once for all shadow maps
-        this.beginShadowMapFrame();
-        try {
-            // For each light that casts shadows
-            for (const [lightId, shadowData] of this.shadowMaps) {
-                if (shadowData.light.enabled && shadowData.light.castShadows) {
-                    this.renderShadowMapInternal(lightId, instanceManager);
-                }
+        // Render all shadow maps
+        // Note: GL state is managed at frame level by InstanceManager
+        // prepareForNormalRendering() will transition state back after shadow rendering
+        for (const [lightId, shadowData] of this.shadowMaps) {
+            if (shadowData.light.enabled && shadowData.light.castShadows) {
+                this.renderShadowMapInternal(lightId, instanceManager);
             }
         }
-        finally {
-            // Restore GL state once after all shadow maps
-            this.endShadowMapFrame();
-        }
+        return true; // Shadows were rendered
     }
     /**
      * Checks if any lights in the array have shadows enabled.
@@ -18054,23 +18030,19 @@ class ShadowMapManager {
         if (!shadowData) {
             throw new Error(`No shadow map data found for light ${lightId}`);
         }
-        // Cache GL state for debug rendering (called independently from frame-level management)
-        this.beginShadowMapFrame();
-        try {
-            // Set up state for debug rendering
-            this.gl.disable(this.gl.DEPTH_TEST);
-            this.gl.disable(this.gl.BLEND);
-            this.gl.viewport(0, 0, this.resolution, this.resolution);
-            // Check if the shader program is already created
-            if (!this.debugShaderProgram) {
-                const vertexShaderSource = `#version 300 es
+        this.gl.disable(this.gl.DEPTH_TEST);
+        this.gl.disable(this.gl.BLEND);
+        this.gl.viewport(0, 0, this.resolution, this.resolution);
+        // Check if the shader program is already created
+        if (!this.debugShaderProgram) {
+            const vertexShaderSource = `#version 300 es
             in vec2 a_position;
             out vec2 v_texCoord;
             void main() {
                 v_texCoord = a_position * 0.5 + 0.5;
                 gl_Position = vec4(a_position, 0.0, 1.0);
             }`;
-                const fragmentShaderSource = `#version 300 es
+            const fragmentShaderSource = `#version 300 es
             precision highp float;
             precision highp sampler2DShadow;
             
@@ -18084,46 +18056,41 @@ class ShadowMapManager {
                 float shadowResult = texture(u_depthTexture, vec3(v_texCoord, 0.9999999999999999));
                 outColor = vec4(vec3(shadowResult), 1.0);
             }`;
-                this.debugShaderProgram = this.createShaderProgram(vertexShaderSource, fragmentShaderSource);
-            }
-            this.gl.useProgram(this.debugShaderProgram);
-            // Bind the shadow map texture
-            this.gl.activeTexture(this.gl.TEXTURE0);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
-            const texLocation = this.gl.getUniformLocation(this.debugShaderProgram, 'u_depthTexture');
-            if (texLocation === null) {
-                throw new Error('Could not find u_depthTexture uniform');
-            }
-            this.gl.uniform1i(texLocation, 0);
-            // Create and set up vertex buffer
-            const positionBuffer = this.gl.createBuffer();
-            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
-            const positions = new Float32Array([
-                -1, -1,
-                1, -1,
-                -1, 1,
-                1, 1,
-            ]);
-            this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
-            const positionLocation = this.gl.getAttribLocation(this.debugShaderProgram, 'a_position');
-            if (positionLocation === -1) {
-                throw new Error('Could not find a_position attribute');
-            }
-            this.gl.enableVertexAttribArray(positionLocation);
-            this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0);
-            // Draw the quad
-            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
-            // Clean up
-            this.gl.disableVertexAttribArray(positionLocation);
-            this.gl.deleteBuffer(positionBuffer);
-            // Restore comparison mode
-            this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
-            this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
+            this.debugShaderProgram = this.createShaderProgram(vertexShaderSource, fragmentShaderSource);
         }
-        finally {
-            // Restore GL state
-            this.endShadowMapFrame();
+        this.gl.useProgram(this.debugShaderProgram);
+        // Bind the shadow map texture
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
+        const texLocation = this.gl.getUniformLocation(this.debugShaderProgram, 'u_depthTexture');
+        if (texLocation === null) {
+            throw new Error('Could not find u_depthTexture uniform');
         }
+        this.gl.uniform1i(texLocation, 0);
+        // Create and set up vertex buffer
+        const positionBuffer = this.gl.createBuffer();
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
+        const positions = new Float32Array([
+            -1, -1,
+            1, -1,
+            -1, 1,
+            1, 1,
+        ]);
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
+        const positionLocation = this.gl.getAttribLocation(this.debugShaderProgram, 'a_position');
+        if (positionLocation === -1) {
+            throw new Error('Could not find a_position attribute');
+        }
+        this.gl.enableVertexAttribArray(positionLocation);
+        this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0);
+        // Draw the quad
+        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+        // Clean up
+        this.gl.disableVertexAttribArray(positionLocation);
+        this.gl.deleteBuffer(positionBuffer);
+        // Restore comparison mode
+        this.gl.bindTexture(this.gl.TEXTURE_2D, shadowData.texture);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_COMPARE_MODE, this.gl.COMPARE_REF_TO_TEXTURE);
     }
     /**
      * Helper method to create a shader program.
@@ -18622,30 +18589,21 @@ class InstanceManager {
         if (this.shadowMapManager) {
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
             // Pass lights array for optimized early exit when no shadows are cast
-            this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
+            const shadowsWereRendered = this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
+            // Only prepare GL state if shadows were actually rendered
+            // This avoids unnecessarily modifying GL state when shadows are disabled/skipped
+            if (shadowsWereRendered) {
+                this.shadowMapManager.prepareForNormalRendering(this.gpuResources.gpuResourceCache.getCachedModelState());
+            }
         }
         // Set multiple shadow map uniforms using new multi-shadow system
         if (this.shadowMapManager) {
             this.gpuResources.setMultipleShadowMapUniforms(this.defaultShaderProgram, this.shadowMapManager);
         }
-        // Ensure color writes are enabled for main scene rendering
-        // C3's renderer may have colorMask disabled from previous operations
-        this.gl.colorMask(true, true, true, true);
         // Update frustum from view-projection matrices
         this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
-        }
-        if (this.shadowMapManager && this.debugShadowMap) {
-            // Debug the first active shadow map
-            const activeShadowMapIndices = this.shadowMapManager.getActiveShadowMapIndices();
-            if (activeShadowMapIndices.length > 0) {
-                const firstActiveShadowMapIndex = activeShadowMapIndices[0];
-                const lightId = this.shadowMapManager.getShadowMapLightId(firstActiveShadowMapIndex);
-                if (lightId >= 0) {
-                    this.shadowMapManager.renderShadowMapDebug(lightId);
-                }
-            }
         }
         this.gpuResources.gpuResourceCache.restoreModelMode();
         if (runtime)

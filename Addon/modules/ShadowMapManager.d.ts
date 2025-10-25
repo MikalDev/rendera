@@ -1,6 +1,7 @@
 import { mat4, vec3 } from 'gl-matrix';
 import type { Light, IGPUResourceManager } from './types';
 import type { InstanceManager } from './InstanceManager';
+import type { WebGLState } from './WebGLStateTracker';
 export declare enum LightType {
     DIRECTIONAL = "directional",
     SPOT = "spot",
@@ -217,22 +218,19 @@ export declare class ShadowMapManager {
     removeShadowMap(lightId: number): void;
     private cleanupGLResources;
     /**
-     * Begins a shadow map rendering frame.
-     * Caches GL state once for the entire shadow rendering pass.
+     * Prepares GL state for normal rendering after shadow map rendering.
+     * Restores the complete GL state that was cached before shadow
+     * @param cachedState The cached C3 GL state to restore
      */
-    private beginShadowMapFrame;
-    /**
-     * Ends a shadow map rendering frame.
-     * Restores the cached GL state after all shadow maps are rendered.
-     */
-    private endShadowMapFrame;
+    prepareForNormalRendering(cachedState: WebGLState | null): void;
     /**
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
      * @param lights - Optional array of lights to check for shadow casting (for early exit optimization)
+     * @returns true if shadows were actually rendered, false if skipped
      */
-    renderAllShadowMaps(instanceManager: InstanceManager, lights?: Light[]): void;
+    renderAllShadowMaps(instanceManager: InstanceManager, lights?: Light[]): boolean;
     /**
      * Checks if any lights in the array have shadows enabled.
      * This is a fast check to determine if shadow rendering is needed at all.
