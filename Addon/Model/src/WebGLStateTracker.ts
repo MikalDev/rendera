@@ -2,6 +2,18 @@
  * WebGL2 State Tracker - Captures and restores WebGL state
  */
 
+/**
+ * Options for selective state capture and restoration
+ */
+export interface SnapshotOptions {
+    /** Skip capturing/restoring texture bindings (performance optimization) */
+    skipTextures?: boolean;
+    /** Skip capturing/restoring buffer bindings */
+    skipBuffers?: boolean;
+    /** Skip capturing/restoring pixel store parameters */
+    skipPixelStore?: boolean;
+}
+
 export interface WebGLState {
     // Texture state
     activeTexture: number;
@@ -417,13 +429,19 @@ export class WebGLStateTracker {
 
     /**
      * Take a snapshot of the current WebGL state
+     * @param options Optional flags to skip capturing certain state (for performance)
      */
-    public snapshot(): WebGLState {
-        // Deep copy texture bindings
-        const textureBindingsCopy = new Map<number, Record<number, WebGLTexture | null>>();
-        for (const [unit, bindings] of this.state.textureBindings.entries()) {
-            textureBindingsCopy.set(unit, { ...bindings });
-        }
+    public snapshot(options?: SnapshotOptions): WebGLState {
+        // Deep copy texture bindings (skip if requested for performance)
+        const textureBindingsCopy = options?.skipTextures
+            ? new Map<number, Record<number, WebGLTexture | null>>()
+            : (() => {
+                const copy = new Map<number, Record<number, WebGLTexture | null>>();
+                for (const [unit, bindings] of this.state.textureBindings.entries()) {
+                    copy.set(unit, { ...bindings });
+                }
+                return copy;
+            })();
 
         return {
             activeTexture: this.state.activeTexture,
@@ -431,12 +449,12 @@ export class WebGLStateTracker {
             boundFramebuffer: this.state.boundFramebuffer,
             boundReadFramebuffer: this.state.boundReadFramebuffer,
             boundDrawFramebuffer: this.state.boundDrawFramebuffer,
-            boundArrayBuffer: this.state.boundArrayBuffer,
-            boundElementArrayBuffer: this.state.boundElementArrayBuffer,
-            boundUniformBuffer: this.state.boundUniformBuffer,
-            boundTransformFeedbackBuffer: this.state.boundTransformFeedbackBuffer,
-            uniformBufferBindings: new Map(this.state.uniformBufferBindings),
-            boundVertexArray: this.state.boundVertexArray,
+            boundArrayBuffer: options?.skipBuffers ? null : this.state.boundArrayBuffer,
+            boundElementArrayBuffer: options?.skipBuffers ? null : this.state.boundElementArrayBuffer,
+            boundUniformBuffer: options?.skipBuffers ? null : this.state.boundUniformBuffer,
+            boundTransformFeedbackBuffer: options?.skipBuffers ? null : this.state.boundTransformFeedbackBuffer,
+            uniformBufferBindings: options?.skipBuffers ? new Map() : new Map(this.state.uniformBufferBindings),
+            boundVertexArray: options?.skipBuffers ? null : this.state.boundVertexArray,
             currentProgram: this.state.currentProgram,
             viewport: [...this.state.viewport],
             scissorBox: [...this.state.scissorBox],
@@ -464,27 +482,30 @@ export class WebGLStateTracker {
             frontFace: this.state.frontFace,
             polygonOffsetFactor: this.state.polygonOffsetFactor,
             polygonOffsetUnits: this.state.polygonOffsetUnits,
-            pixelStorei: new Map(this.state.pixelStorei),
+            pixelStorei: options?.skipPixelStore ? new Map() : new Map(this.state.pixelStorei),
         };
     }
 
     /**
      * Restore WebGL state from a snapshot
      * @param snapshot The state snapshot to restore
+     * @param options Optional flags to skip restoring certain state (for performance)
      */
-    public restore(snapshot: WebGLState): void {
+    public restore(snapshot: WebGLState, options?: SnapshotOptions): void {
         const gl = this.gl;
         const original = this.original;
 
-        // Restore textures without validation - trust that textures are valid
-        original.activeTexture(snapshot.activeTexture);
-        for (const [unit, bindings] of snapshot.textureBindings.entries()) {
-            original.activeTexture(gl.TEXTURE0 + unit);
-            for (const [target, texture] of Object.entries(bindings)) {
-                original.bindTexture(Number(target), texture || null);
+        // Restore textures without validation - trust that textures are valid (skip if requested)
+        if (!options?.skipTextures) {
+            original.activeTexture(snapshot.activeTexture);
+            for (const [unit, bindings] of snapshot.textureBindings.entries()) {
+                original.activeTexture(gl.TEXTURE0 + unit);
+                for (const [target, texture] of Object.entries(bindings)) {
+                    original.bindTexture(Number(target), texture || null);
+                }
             }
+            original.activeTexture(snapshot.activeTexture);
         }
-        original.activeTexture(snapshot.activeTexture);
 
         // Restore framebuffers without validation - trust that framebuffers are valid
         original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
@@ -497,32 +518,36 @@ export class WebGLStateTracker {
             original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer || null);
         }
 
-        // IMPORTANT: Restore VAO first, before element array buffer
-        // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
-        // so we must restore the VAO before restoring the element buffer
-        // Restore without validation - trust that VAOs are valid
-        original.bindVertexArray(snapshot.boundVertexArray || null);
+        // Restore buffers (skip if requested for performance)
+        if (!options?.skipBuffers) {
+            // IMPORTANT: Restore VAO first, before element array buffer
+            // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
+            // so we must restore the VAO before restoring the element buffer
+            // Restore without validation - trust that VAOs are valid
+            original.bindVertexArray(snapshot.boundVertexArray || null);
 
-        // Restore buffers without validation - trust that buffers are valid
-        // This avoids expensive gl.isBuffer calls
-        original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer || null);
-        original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer || null);
-        if (snapshot.boundUniformBuffer !== undefined) {
-            original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
-        }
-        if (snapshot.boundTransformFeedbackBuffer !== undefined) {
-            original.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, snapshot.boundTransformFeedbackBuffer);
-        }
+            // Restore buffers without validation - trust that buffers are valid
+            // This avoids expensive gl.isBuffer calls
+            original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer || null);
+            original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer || null);
+            if (snapshot.boundUniformBuffer !== undefined) {
+                original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
+            }
+            if (snapshot.boundTransformFeedbackBuffer !== undefined) {
+                original.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, snapshot.boundTransformFeedbackBuffer);
+            }
 
-        // Restore uniform buffer base bindings
-        if (snapshot.uniformBufferBindings) {
-            for (const [index, buffer] of snapshot.uniformBufferBindings.entries()) {
-                original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
+            // Restore uniform buffer base bindings
+            if (snapshot.uniformBufferBindings) {
+                for (const [index, buffer] of snapshot.uniformBufferBindings.entries()) {
+                    original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
+                }
             }
         }
 
         // Restore program with validation - only restore if valid
         if (snapshot.currentProgram) {
+            /*
             const isValidProgram = gl.isProgram(snapshot.currentProgram);
             if (!isValidProgram) {
                 console.error('[WebGLStateTracker] Invalid shader program detected during restore - skipping restoration:', snapshot.currentProgram);
@@ -530,6 +555,9 @@ export class WebGLStateTracker {
             } else {
                 original.useProgram(snapshot.currentProgram);
             }
+                */
+            original.useProgram(snapshot.currentProgram);
+
         } else {
             original.useProgram(null);
         }
@@ -583,8 +611,8 @@ export class WebGLStateTracker {
         // Restore polygon offset
         original.polygonOffset(snapshot.polygonOffsetFactor, snapshot.polygonOffsetUnits);
 
-        // Restore pixel store parameters
-        if (snapshot.pixelStorei) {
+        // Restore pixel store parameters (skip if requested for performance)
+        if (!options?.skipPixelStore && snapshot.pixelStorei) {
             for (const [pname, value] of snapshot.pixelStorei.entries()) {
                 original.pixelStorei(pname, value as any);
             }

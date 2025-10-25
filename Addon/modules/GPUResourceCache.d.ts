@@ -1,10 +1,11 @@
 import { IGPUResourceCache } from './types';
+import { WebGLState } from './WebGLStateTracker';
 export declare class GPUResourceCache implements IGPUResourceCache {
     private gl;
     private cachedModelState;
     private cachedState;
     private static readonly TRACKED_UBO_BINDING_POINTS;
-    private tempShadowState;
+    private cachedShadowState;
     constructor(gl: WebGL2RenderingContext);
     cacheModelMode(): void;
     restoreModelMode(): void;
@@ -23,26 +24,14 @@ export declare class GPUResourceCache implements IGPUResourceCache {
     cacheShadowMapState(): void;
     /**
      * Restore the cached GL state after shadow map rendering.
-     * Clears the temp state after restoring to prevent stale references.
+     * Uses WebGLStateTracker for consistent state management.
      */
     restoreShadowMapState(): void;
     /**
      * Get the cached shadow state.
-     * Returns the temporary state if available.
+     * Returns the cached WebGLState snapshot if available.
      */
-    getShadowState(): {
-        textureBinding2D: WebGLTexture | null;
-        framebufferBinding: WebGLFramebuffer | null;
-        viewport: Int32Array;
-        depthTest: boolean;
-        depthFunc: number;
-        colorWritemask: boolean[];
-        scissorTest: boolean;
-        blend: boolean;
-        currentProgram: WebGLProgram | null;
-        colorClearValue: Float32Array;
-        depthClearValue: number;
-    } | null;
+    getShadowState(): WebGLState | null;
     /**
      * Clear the shadow state cache (e.g., on context loss).
      */

@@ -23,20 +23,8 @@ export class GPUResourceCache implements IGPUResourceCache {
     // Track which UBO binding points we care about
     private static readonly TRACKED_UBO_BINDING_POINTS = [0, 1, 2, 3]; // Track first 4 binding points
 
-    // Temporary shadow map state - not persistent between calls
-    private tempShadowState: {
-        textureBinding2D: WebGLTexture | null;
-        framebufferBinding: WebGLFramebuffer | null;
-        viewport: Int32Array;
-        depthTest: boolean;
-        depthFunc: number;
-        colorWritemask: boolean[];
-        scissorTest: boolean;
-        blend: boolean;
-        currentProgram: WebGLProgram | null;
-        colorClearValue: Float32Array;
-        depthClearValue: number;
-    } | null = null;
+    // Shadow map state - using WebGLState snapshot for consistency
+    private cachedShadowState: WebGLState | null = null;
 
     constructor(gl: WebGL2RenderingContext) {
         this.gl = gl;
@@ -124,133 +112,50 @@ export class GPUResourceCache implements IGPUResourceCache {
      * Uses WebGLStateTracker snapshot when available for better performance.
      */
     cacheShadowMapState(): void {
-        // Try to get state from WebGLStateTracker first (more efficient)
+        // Use WebGLStateTracker snapshot with performance optimizations
+        // Skip textures, buffers, and pixel store since shadow rendering doesn't need them
         const tracker = WebGLStateTracker.getInstance();
         if (tracker) {
-            const state = tracker.getState();
-
-            // Get current texture binding for active texture unit
-            const activeUnit = (state.activeTexture - this.gl.TEXTURE0);
-            const textureBinding2D = state.textureBindings.get(activeUnit)?.[this.gl.TEXTURE_2D] ?? null;
-
-            // Convert viewport array if needed
-            const viewport = state.viewport.length === 4
-                ? new Int32Array(state.viewport)
-                : this.gl.getParameter(this.gl.VIEWPORT);
-
-            // Convert color clear value if needed
-            const colorClearValue = state.clearColor.length === 4
-                ? new Float32Array(state.clearColor)
-                : this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
-
-            this.tempShadowState = {
-                textureBinding2D: textureBinding2D,
-                framebufferBinding: state.boundFramebuffer,
-                viewport: viewport,
-                depthTest: state.capabilities.get(this.gl.DEPTH_TEST) ?? false,
-                depthFunc: state.depthFunc,
-                colorWritemask: state.colorMask,
-                scissorTest: state.capabilities.get(this.gl.SCISSOR_TEST) ?? false,
-                blend: state.capabilities.get(this.gl.BLEND) ?? false,
-                currentProgram: state.currentProgram,
-                colorClearValue: colorClearValue,
-                depthClearValue: state.clearDepth ?? 1.0  // Use tracked clearDepth value
-            };
-        } else {
-            // Fallback to GL queries if tracker not available
-            this.tempShadowState = {
-                textureBinding2D: this.gl.getParameter(this.gl.TEXTURE_BINDING_2D),
-                framebufferBinding: this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING),
-                viewport: this.gl.getParameter(this.gl.VIEWPORT),
-                depthTest: this.gl.getParameter(this.gl.DEPTH_TEST),
-                depthFunc: this.gl.getParameter(this.gl.DEPTH_FUNC),
-                colorWritemask: this.gl.getParameter(this.gl.COLOR_WRITEMASK),
-                scissorTest: this.gl.getParameter(this.gl.SCISSOR_TEST),
-                blend: this.gl.getParameter(this.gl.BLEND),
-                currentProgram: this.gl.getParameter(this.gl.CURRENT_PROGRAM),
-                colorClearValue: this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE),
-                depthClearValue: this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE)
-            };
+            this.cachedShadowState = tracker.snapshot({
+                skipTextures: true,
+                skipBuffers: true,
+                skipPixelStore: true
+            });
         }
     }
 
     /**
      * Restore the cached GL state after shadow map rendering.
-     * Clears the temp state after restoring to prevent stale references.
+     * Uses WebGLStateTracker for consistent state management.
      */
     restoreShadowMapState(): void {
-        if (this.tempShadowState) {
-            // Restore all cached GL state
-            this.gl.bindTexture(this.gl.TEXTURE_2D, this.tempShadowState.textureBinding2D);
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.tempShadowState.framebufferBinding);
-            this.gl.viewport(
-                this.tempShadowState.viewport[0],
-                this.tempShadowState.viewport[1],
-                this.tempShadowState.viewport[2],
-                this.tempShadowState.viewport[3]
-            );
-            
-            if (this.tempShadowState.depthTest) {
-                this.gl.enable(this.gl.DEPTH_TEST);
-            } else {
-                this.gl.disable(this.gl.DEPTH_TEST);
-            }
-            
-            this.gl.depthFunc(this.tempShadowState.depthFunc);
-            this.gl.colorMask(
-                this.tempShadowState.colorWritemask[0],
-                this.tempShadowState.colorWritemask[1],
-                this.tempShadowState.colorWritemask[2],
-                this.tempShadowState.colorWritemask[3]
-            );
-            
-            if (this.tempShadowState.scissorTest) {
-                this.gl.enable(this.gl.SCISSOR_TEST);
-            } else {
-                this.gl.disable(this.gl.SCISSOR_TEST);
-            }
-            
-            if (this.tempShadowState.blend) {
-                this.gl.enable(this.gl.BLEND);
-            } else {
-                this.gl.disable(this.gl.BLEND);
-            }
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker && this.cachedShadowState) {
+            // Restore state with same options used for snapshot
+            tracker.restore(this.cachedShadowState, {
+                skipTextures: true,
+                skipBuffers: true,
+                skipPixelStore: true
+            });
 
-            // Validate program before restoring - only restore if valid
-            if (this.tempShadowState.currentProgram && this.gl.isProgram(this.tempShadowState.currentProgram)) {
-                this.gl.useProgram(this.tempShadowState.currentProgram);
-            } else {
-                if (this.tempShadowState.currentProgram) {
-                    console.error('[GPUResourceCache] Invalid shader program detected during restore - skipping restoration');
-                }
-                this.gl.useProgram(null);  // Unbind program instead of using invalid one
-            }
-            this.gl.clearColor(
-                this.tempShadowState.colorClearValue[0],
-                this.tempShadowState.colorClearValue[1],
-                this.tempShadowState.colorClearValue[2],
-                this.tempShadowState.colorClearValue[3]
-            );
-            this.gl.clearDepth(this.tempShadowState.depthClearValue);
-            
-            // Clear temp state after restore to prevent stale references
-            this.tempShadowState = null;
+            // Clear cached state after restore to prevent stale references
+            this.cachedShadowState = null;
         }
     }
 
     /**
      * Get the cached shadow state.
-     * Returns the temporary state if available.
+     * Returns the cached WebGLState snapshot if available.
      */
     getShadowState() {
-        return this.tempShadowState;
+        return this.cachedShadowState;
     }
 
     /**
      * Clear the shadow state cache (e.g., on context loss).
      */
     clearShadowStateCache(): void {
-        this.tempShadowState = null;
+        this.cachedShadowState = null;
     }
 
 }

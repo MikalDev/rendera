@@ -885,11 +885,6 @@ export class GPUResourceManager implements IGPUResourceManager {
         shadowMapManager: ShadowMapManager,
         bias: number = 0.001
     ): void {
-        // Validate shader program before using it
-        if (!this.gl.isProgram(shader)) {
-            console.error('[GPUResourceManager] Invalid shader program provided to setMultipleShadowMapUniforms');
-            return;
-        }
 
         this.gl.useProgram(shader);
 

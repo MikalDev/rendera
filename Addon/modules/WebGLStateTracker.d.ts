@@ -1,6 +1,17 @@
 /**
  * WebGL2 State Tracker - Captures and restores WebGL state
  */
+/**
+ * Options for selective state capture and restoration
+ */
+export interface SnapshotOptions {
+    /** Skip capturing/restoring texture bindings (performance optimization) */
+    skipTextures?: boolean;
+    /** Skip capturing/restoring buffer bindings */
+    skipBuffers?: boolean;
+    /** Skip capturing/restoring pixel store parameters */
+    skipPixelStore?: boolean;
+}
 export interface WebGLState {
     activeTexture: number;
     textureBindings: Map<number, Record<number, WebGLTexture | null>>;
@@ -71,13 +82,15 @@ export declare class WebGLStateTracker {
     };
     /**
      * Take a snapshot of the current WebGL state
+     * @param options Optional flags to skip capturing certain state (for performance)
      */
-    snapshot(): WebGLState;
+    snapshot(options?: SnapshotOptions): WebGLState;
     /**
      * Restore WebGL state from a snapshot
      * @param snapshot The state snapshot to restore
+     * @param options Optional flags to skip restoring certain state (for performance)
      */
-    restore(snapshot: WebGLState): void;
+    restore(snapshot: WebGLState, options?: SnapshotOptions): void;
     /**
      * Get the current state
      */

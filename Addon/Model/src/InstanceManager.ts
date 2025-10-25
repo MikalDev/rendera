@@ -115,14 +115,11 @@ export class InstanceManager implements IInstanceManager {
         return { view: viewMatrix, projection: projectionMatrix };
     }
 
-    createModel(modelId: string, animationName?: string): Model {
+    createModel(modelId: string, animationName?: string): Model | null {
         // Verify model exists
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData) {
-            throw this.createError(
-                ModelErrorCode.RESOURCE_NOT_FOUND,
-                `Model ${modelId} not found`
-            );
+            return null;
         }
         
         // Cache model in worker if not already cached (only once per model)

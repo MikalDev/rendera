@@ -31,7 +31,7 @@ export declare class InstanceManager implements IInstanceManager {
         view: mat4;
         projection: mat4;
     };
-    createModel(modelId: string, animationName?: string): Model;
+    createModel(modelId: string, animationName?: string): Model | null;
     deleteModel(instanceId: number): void;
     updateInstance(instanceId: number, deltaTime: number): void;
     render(viewProjection: {

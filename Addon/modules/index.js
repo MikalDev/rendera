@@ -14815,25 +14815,31 @@ class WebGLStateTracker {
     }
     /**
      * Take a snapshot of the current WebGL state
+     * @param options Optional flags to skip capturing certain state (for performance)
      */
-    snapshot() {
-        // Deep copy texture bindings
-        const textureBindingsCopy = new Map();
-        for (const [unit, bindings] of this.state.textureBindings.entries()) {
-            textureBindingsCopy.set(unit, { ...bindings });
-        }
+    snapshot(options) {
+        // Deep copy texture bindings (skip if requested for performance)
+        const textureBindingsCopy = (options === null || options === void 0 ? void 0 : options.skipTextures)
+            ? new Map()
+            : (() => {
+                const copy = new Map();
+                for (const [unit, bindings] of this.state.textureBindings.entries()) {
+                    copy.set(unit, { ...bindings });
+                }
+                return copy;
+            })();
         return {
             activeTexture: this.state.activeTexture,
             textureBindings: textureBindingsCopy,
             boundFramebuffer: this.state.boundFramebuffer,
             boundReadFramebuffer: this.state.boundReadFramebuffer,
             boundDrawFramebuffer: this.state.boundDrawFramebuffer,
-            boundArrayBuffer: this.state.boundArrayBuffer,
-            boundElementArrayBuffer: this.state.boundElementArrayBuffer,
-            boundUniformBuffer: this.state.boundUniformBuffer,
-            boundTransformFeedbackBuffer: this.state.boundTransformFeedbackBuffer,
-            uniformBufferBindings: new Map(this.state.uniformBufferBindings),
-            boundVertexArray: this.state.boundVertexArray,
+            boundArrayBuffer: (options === null || options === void 0 ? void 0 : options.skipBuffers) ? null : this.state.boundArrayBuffer,
+            boundElementArrayBuffer: (options === null || options === void 0 ? void 0 : options.skipBuffers) ? null : this.state.boundElementArrayBuffer,
+            boundUniformBuffer: (options === null || options === void 0 ? void 0 : options.skipBuffers) ? null : this.state.boundUniformBuffer,
+            boundTransformFeedbackBuffer: (options === null || options === void 0 ? void 0 : options.skipBuffers) ? null : this.state.boundTransformFeedbackBuffer,
+            uniformBufferBindings: (options === null || options === void 0 ? void 0 : options.skipBuffers) ? new Map() : new Map(this.state.uniformBufferBindings),
+            boundVertexArray: (options === null || options === void 0 ? void 0 : options.skipBuffers) ? null : this.state.boundVertexArray,
             currentProgram: this.state.currentProgram,
             viewport: [...this.state.viewport],
             scissorBox: [...this.state.scissorBox],
@@ -14861,25 +14867,28 @@ class WebGLStateTracker {
             frontFace: this.state.frontFace,
             polygonOffsetFactor: this.state.polygonOffsetFactor,
             polygonOffsetUnits: this.state.polygonOffsetUnits,
-            pixelStorei: new Map(this.state.pixelStorei),
+            pixelStorei: (options === null || options === void 0 ? void 0 : options.skipPixelStore) ? new Map() : new Map(this.state.pixelStorei),
         };
     }
     /**
      * Restore WebGL state from a snapshot
      * @param snapshot The state snapshot to restore
+     * @param options Optional flags to skip restoring certain state (for performance)
      */
-    restore(snapshot) {
+    restore(snapshot, options) {
         const gl = this.gl;
         const original = this.original;
-        // Restore textures without validation - trust that textures are valid
-        original.activeTexture(snapshot.activeTexture);
-        for (const [unit, bindings] of snapshot.textureBindings.entries()) {
-            original.activeTexture(gl.TEXTURE0 + unit);
-            for (const [target, texture] of Object.entries(bindings)) {
-                original.bindTexture(Number(target), texture || null);
+        // Restore textures without validation - trust that textures are valid (skip if requested)
+        if (!(options === null || options === void 0 ? void 0 : options.skipTextures)) {
+            original.activeTexture(snapshot.activeTexture);
+            for (const [unit, bindings] of snapshot.textureBindings.entries()) {
+                original.activeTexture(gl.TEXTURE0 + unit);
+                for (const [target, texture] of Object.entries(bindings)) {
+                    original.bindTexture(Number(target), texture || null);
+                }
             }
+            original.activeTexture(snapshot.activeTexture);
         }
-        original.activeTexture(snapshot.activeTexture);
         // Restore framebuffers without validation - trust that framebuffers are valid
         original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
         if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
@@ -14888,37 +14897,42 @@ class WebGLStateTracker {
         if (snapshot.boundDrawFramebuffer !== snapshot.boundFramebuffer) {
             original.bindFramebuffer(gl.DRAW_FRAMEBUFFER, snapshot.boundDrawFramebuffer || null);
         }
-        // IMPORTANT: Restore VAO first, before element array buffer
-        // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
-        // so we must restore the VAO before restoring the element buffer
-        // Restore without validation - trust that VAOs are valid
-        original.bindVertexArray(snapshot.boundVertexArray || null);
-        // Restore buffers without validation - trust that buffers are valid
-        // This avoids expensive gl.isBuffer calls
-        original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer || null);
-        original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer || null);
-        if (snapshot.boundUniformBuffer !== undefined) {
-            original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
-        }
-        if (snapshot.boundTransformFeedbackBuffer !== undefined) {
-            original.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, snapshot.boundTransformFeedbackBuffer);
-        }
-        // Restore uniform buffer base bindings
-        if (snapshot.uniformBufferBindings) {
-            for (const [index, buffer] of snapshot.uniformBufferBindings.entries()) {
-                original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
+        // Restore buffers (skip if requested for performance)
+        if (!(options === null || options === void 0 ? void 0 : options.skipBuffers)) {
+            // IMPORTANT: Restore VAO first, before element array buffer
+            // VAOs capture the ELEMENT_ARRAY_BUFFER binding when they are bound,
+            // so we must restore the VAO before restoring the element buffer
+            // Restore without validation - trust that VAOs are valid
+            original.bindVertexArray(snapshot.boundVertexArray || null);
+            // Restore buffers without validation - trust that buffers are valid
+            // This avoids expensive gl.isBuffer calls
+            original.bindBuffer(gl.ARRAY_BUFFER, snapshot.boundArrayBuffer || null);
+            original.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, snapshot.boundElementArrayBuffer || null);
+            if (snapshot.boundUniformBuffer !== undefined) {
+                original.bindBuffer(gl.UNIFORM_BUFFER, snapshot.boundUniformBuffer);
+            }
+            if (snapshot.boundTransformFeedbackBuffer !== undefined) {
+                original.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, snapshot.boundTransformFeedbackBuffer);
+            }
+            // Restore uniform buffer base bindings
+            if (snapshot.uniformBufferBindings) {
+                for (const [index, buffer] of snapshot.uniformBufferBindings.entries()) {
+                    original.bindBufferBase(gl.UNIFORM_BUFFER, index, buffer);
+                }
             }
         }
         // Restore program with validation - only restore if valid
         if (snapshot.currentProgram) {
+            /*
             const isValidProgram = gl.isProgram(snapshot.currentProgram);
             if (!isValidProgram) {
                 console.error('[WebGLStateTracker] Invalid shader program detected during restore - skipping restoration:', snapshot.currentProgram);
-                original.useProgram(null); // Unbind program instead of using invalid one
-            }
-            else {
+                original.useProgram(null);  // Unbind program instead of using invalid one
+            } else {
                 original.useProgram(snapshot.currentProgram);
             }
+                */
+            original.useProgram(snapshot.currentProgram);
         }
         else {
             original.useProgram(null);
@@ -14957,8 +14971,8 @@ class WebGLStateTracker {
         original.frontFace(snapshot.frontFace);
         // Restore polygon offset
         original.polygonOffset(snapshot.polygonOffsetFactor, snapshot.polygonOffsetUnits);
-        // Restore pixel store parameters
-        if (snapshot.pixelStorei) {
+        // Restore pixel store parameters (skip if requested for performance)
+        if (!(options === null || options === void 0 ? void 0 : options.skipPixelStore) && snapshot.pixelStorei) {
             for (const [pname, value] of snapshot.pixelStorei.entries()) {
                 original.pixelStorei(pname, value);
             }
@@ -15007,8 +15021,8 @@ class GPUResourceCache {
         this.cachedModelState = null;
         // Old implementation kept for reference/comparison
         this.cachedState = null;
-        // Temporary shadow map state - not persistent between calls
-        this.tempShadowState = null;
+        // Shadow map state - using WebGLState snapshot for consistency
+        this.cachedShadowState = null;
         this.gl = gl;
     }
     cacheModelMode() {
@@ -15078,111 +15092,46 @@ class GPUResourceCache {
      * Uses WebGLStateTracker snapshot when available for better performance.
      */
     cacheShadowMapState() {
-        var _a, _b, _c, _d, _e, _f;
-        // Try to get state from WebGLStateTracker first (more efficient)
+        // Use WebGLStateTracker snapshot with performance optimizations
+        // Skip textures, buffers, and pixel store since shadow rendering doesn't need them
         const tracker = WebGLStateTracker.getInstance();
         if (tracker) {
-            const state = tracker.getState();
-            // Get current texture binding for active texture unit
-            const activeUnit = (state.activeTexture - this.gl.TEXTURE0);
-            const textureBinding2D = (_b = (_a = state.textureBindings.get(activeUnit)) === null || _a === void 0 ? void 0 : _a[this.gl.TEXTURE_2D]) !== null && _b !== void 0 ? _b : null;
-            // Convert viewport array if needed
-            const viewport = state.viewport.length === 4
-                ? new Int32Array(state.viewport)
-                : this.gl.getParameter(this.gl.VIEWPORT);
-            // Convert color clear value if needed
-            const colorClearValue = state.clearColor.length === 4
-                ? new Float32Array(state.clearColor)
-                : this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE);
-            this.tempShadowState = {
-                textureBinding2D: textureBinding2D,
-                framebufferBinding: state.boundFramebuffer,
-                viewport: viewport,
-                depthTest: (_c = state.capabilities.get(this.gl.DEPTH_TEST)) !== null && _c !== void 0 ? _c : false,
-                depthFunc: state.depthFunc,
-                colorWritemask: state.colorMask,
-                scissorTest: (_d = state.capabilities.get(this.gl.SCISSOR_TEST)) !== null && _d !== void 0 ? _d : false,
-                blend: (_e = state.capabilities.get(this.gl.BLEND)) !== null && _e !== void 0 ? _e : false,
-                currentProgram: state.currentProgram,
-                colorClearValue: colorClearValue,
-                depthClearValue: (_f = state.clearDepth) !== null && _f !== void 0 ? _f : 1.0 // Use tracked clearDepth value
-            };
-        }
-        else {
-            // Fallback to GL queries if tracker not available
-            this.tempShadowState = {
-                textureBinding2D: this.gl.getParameter(this.gl.TEXTURE_BINDING_2D),
-                framebufferBinding: this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING),
-                viewport: this.gl.getParameter(this.gl.VIEWPORT),
-                depthTest: this.gl.getParameter(this.gl.DEPTH_TEST),
-                depthFunc: this.gl.getParameter(this.gl.DEPTH_FUNC),
-                colorWritemask: this.gl.getParameter(this.gl.COLOR_WRITEMASK),
-                scissorTest: this.gl.getParameter(this.gl.SCISSOR_TEST),
-                blend: this.gl.getParameter(this.gl.BLEND),
-                currentProgram: this.gl.getParameter(this.gl.CURRENT_PROGRAM),
-                colorClearValue: this.gl.getParameter(this.gl.COLOR_CLEAR_VALUE),
-                depthClearValue: this.gl.getParameter(this.gl.DEPTH_CLEAR_VALUE)
-            };
+            this.cachedShadowState = tracker.snapshot({
+                skipTextures: true,
+                skipBuffers: true,
+                skipPixelStore: true
+            });
         }
     }
     /**
      * Restore the cached GL state after shadow map rendering.
-     * Clears the temp state after restoring to prevent stale references.
+     * Uses WebGLStateTracker for consistent state management.
      */
     restoreShadowMapState() {
-        if (this.tempShadowState) {
-            // Restore all cached GL state
-            this.gl.bindTexture(this.gl.TEXTURE_2D, this.tempShadowState.textureBinding2D);
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.tempShadowState.framebufferBinding);
-            this.gl.viewport(this.tempShadowState.viewport[0], this.tempShadowState.viewport[1], this.tempShadowState.viewport[2], this.tempShadowState.viewport[3]);
-            if (this.tempShadowState.depthTest) {
-                this.gl.enable(this.gl.DEPTH_TEST);
-            }
-            else {
-                this.gl.disable(this.gl.DEPTH_TEST);
-            }
-            this.gl.depthFunc(this.tempShadowState.depthFunc);
-            this.gl.colorMask(this.tempShadowState.colorWritemask[0], this.tempShadowState.colorWritemask[1], this.tempShadowState.colorWritemask[2], this.tempShadowState.colorWritemask[3]);
-            if (this.tempShadowState.scissorTest) {
-                this.gl.enable(this.gl.SCISSOR_TEST);
-            }
-            else {
-                this.gl.disable(this.gl.SCISSOR_TEST);
-            }
-            if (this.tempShadowState.blend) {
-                this.gl.enable(this.gl.BLEND);
-            }
-            else {
-                this.gl.disable(this.gl.BLEND);
-            }
-            // Validate program before restoring - only restore if valid
-            if (this.tempShadowState.currentProgram && this.gl.isProgram(this.tempShadowState.currentProgram)) {
-                this.gl.useProgram(this.tempShadowState.currentProgram);
-            }
-            else {
-                if (this.tempShadowState.currentProgram) {
-                    console.error('[GPUResourceCache] Invalid shader program detected during restore - skipping restoration');
-                }
-                this.gl.useProgram(null); // Unbind program instead of using invalid one
-            }
-            this.gl.clearColor(this.tempShadowState.colorClearValue[0], this.tempShadowState.colorClearValue[1], this.tempShadowState.colorClearValue[2], this.tempShadowState.colorClearValue[3]);
-            this.gl.clearDepth(this.tempShadowState.depthClearValue);
-            // Clear temp state after restore to prevent stale references
-            this.tempShadowState = null;
+        const tracker = WebGLStateTracker.getInstance();
+        if (tracker && this.cachedShadowState) {
+            // Restore state with same options used for snapshot
+            tracker.restore(this.cachedShadowState, {
+                skipTextures: true,
+                skipBuffers: true,
+                skipPixelStore: true
+            });
+            // Clear cached state after restore to prevent stale references
+            this.cachedShadowState = null;
         }
     }
     /**
      * Get the cached shadow state.
-     * Returns the temporary state if available.
+     * Returns the cached WebGLState snapshot if available.
      */
     getShadowState() {
-        return this.tempShadowState;
+        return this.cachedShadowState;
     }
     /**
      * Clear the shadow state cache (e.g., on context loss).
      */
     clearShadowStateCache() {
-        this.tempShadowState = null;
+        this.cachedShadowState = null;
     }
 }
 // Track which UBO binding points we care about
@@ -15977,11 +15926,6 @@ class GPUResourceManager {
      * This method replaces setShadowMapUniforms for the new multi-shadow architecture.
      */
     setMultipleShadowMapUniforms(shader, shadowMapManager, bias = 0.001) {
-        // Validate shader program before using it
-        if (!this.gl.isProgram(shader)) {
-            console.error('[GPUResourceManager] Invalid shader program provided to setMultipleShadowMapUniforms');
-            return;
-        }
         this.gl.useProgram(shader);
         // Get active shadow map data
         const activeShadowMapIndices = shadowMapManager.getActiveShadowMapIndices();
@@ -18579,7 +18523,7 @@ class InstanceManager {
         // Verify model exists
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData) {
-            throw this.createError(ModelErrorCode.RESOURCE_NOT_FOUND, `Model ${modelId} not found`);
+            return null;
         }
         // Cache model in worker if not already cached (only once per model)
         // Note: This is async but we don't await it to avoid blocking instance creation
