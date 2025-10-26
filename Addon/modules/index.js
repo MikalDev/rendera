@@ -14904,8 +14904,20 @@ class WebGLStateTracker {
             }
             original.activeTexture(snapshot.activeTexture);
         }
-        // Restore framebuffers without validation - trust that framebuffers are valid
-        original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
+        // Restore framebuffers with inside knowledge validation
+        // If deleteFramebuffer was called, our wrapper set this.state to null
+        // So we can detect stale snapshots by comparing to current state
+        let needsResync = false;
+        // Check if snapshot framebuffer was deleted (current state is null but snapshot has one)
+        if (snapshot.boundFramebuffer && !this.state.boundFramebuffer) {
+            console.warn('[WebGLStateTracker] Snapshot has deleted framebuffer, will resync after restore');
+            needsResync = true;
+            // Bind null instead of deleted framebuffer
+            original.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+        else {
+            original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
+        }
         if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
             original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer || null);
         }
@@ -14997,6 +15009,89 @@ class WebGLStateTracker {
         // because restore() uses original methods which bypass the monkeypatch
         // snapshot() creates deep copies of Maps and arrays, so direct assignment is safe
         this.state = snapshot;
+        // If snapshot had a deleted framebuffer, trigger full resync
+        if (needsResync) {
+            console.warn('[WebGLStateTracker] Triggering full state resync due to deleted framebuffer');
+            this.syncWithGLState();
+        }
+    }
+    /**
+     * Synchronize tracker state with actual GL state by querying all tracked parameters.
+     * Use this when you suspect the tracker is out of sync with reality (e.g., after C3 resize).
+     * This is expensive (lots of GL queries) so only call when necessary.
+     */
+    syncWithGLState() {
+        const gl = this.gl;
+        console.log('[WebGLStateTracker] Synchronizing tracker state with actual GL state...');
+        // Query texture state
+        this.state.activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
+        // Query framebuffer state
+        this.state.boundFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+        this.state.boundReadFramebuffer = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+        this.state.boundDrawFramebuffer = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING);
+        // Query buffer state
+        this.state.boundArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+        this.state.boundElementArrayBuffer = gl.getParameter(gl.ELEMENT_ARRAY_BUFFER_BINDING);
+        this.state.boundUniformBuffer = gl.getParameter(gl.UNIFORM_BUFFER_BINDING);
+        this.state.boundTransformFeedbackBuffer = gl.getParameter(gl.TRANSFORM_FEEDBACK_BUFFER_BINDING);
+        // Query VAO state
+        this.state.boundVertexArray = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+        // Query program state
+        this.state.currentProgram = gl.getParameter(gl.CURRENT_PROGRAM);
+        // Query viewport and scissor
+        const viewport = gl.getParameter(gl.VIEWPORT);
+        this.state.viewport = [viewport[0], viewport[1], viewport[2], viewport[3]];
+        const scissorBox = gl.getParameter(gl.SCISSOR_BOX);
+        this.state.scissorBox = [scissorBox[0], scissorBox[1], scissorBox[2], scissorBox[3]];
+        // Query capabilities
+        this.state.capabilities.set(gl.BLEND, gl.getParameter(gl.BLEND));
+        this.state.capabilities.set(gl.CULL_FACE, gl.getParameter(gl.CULL_FACE));
+        this.state.capabilities.set(gl.DEPTH_TEST, gl.getParameter(gl.DEPTH_TEST));
+        this.state.capabilities.set(gl.DITHER, gl.getParameter(gl.DITHER));
+        this.state.capabilities.set(gl.POLYGON_OFFSET_FILL, gl.getParameter(gl.POLYGON_OFFSET_FILL));
+        this.state.capabilities.set(gl.SAMPLE_ALPHA_TO_COVERAGE, gl.getParameter(gl.SAMPLE_ALPHA_TO_COVERAGE));
+        this.state.capabilities.set(gl.SAMPLE_COVERAGE, gl.getParameter(gl.SAMPLE_COVERAGE));
+        this.state.capabilities.set(gl.SCISSOR_TEST, gl.getParameter(gl.SCISSOR_TEST));
+        this.state.capabilities.set(gl.STENCIL_TEST, gl.getParameter(gl.STENCIL_TEST));
+        // Query blend state
+        this.state.blendSrcRGB = gl.getParameter(gl.BLEND_SRC_RGB);
+        this.state.blendDstRGB = gl.getParameter(gl.BLEND_DST_RGB);
+        this.state.blendSrcAlpha = gl.getParameter(gl.BLEND_SRC_ALPHA);
+        this.state.blendDstAlpha = gl.getParameter(gl.BLEND_DST_ALPHA);
+        this.state.blendEquationRGB = gl.getParameter(gl.BLEND_EQUATION_RGB);
+        this.state.blendEquationAlpha = gl.getParameter(gl.BLEND_EQUATION_ALPHA);
+        const blendColor = gl.getParameter(gl.BLEND_COLOR);
+        this.state.blendColor = [blendColor[0], blendColor[1], blendColor[2], blendColor[3]];
+        // Query depth state
+        this.state.depthFunc = gl.getParameter(gl.DEPTH_FUNC);
+        this.state.depthMask = gl.getParameter(gl.DEPTH_WRITEMASK);
+        const depthRange = gl.getParameter(gl.DEPTH_RANGE);
+        this.state.depthRange = [depthRange[0], depthRange[1]];
+        // Query stencil state
+        this.state.stencilFunc = gl.getParameter(gl.STENCIL_FUNC);
+        this.state.stencilRef = gl.getParameter(gl.STENCIL_REF);
+        this.state.stencilMask = gl.getParameter(gl.STENCIL_VALUE_MASK);
+        this.state.stencilFail = gl.getParameter(gl.STENCIL_FAIL);
+        this.state.stencilZFail = gl.getParameter(gl.STENCIL_PASS_DEPTH_FAIL);
+        this.state.stencilZPass = gl.getParameter(gl.STENCIL_PASS_DEPTH_PASS);
+        // Query color state
+        const colorMask = gl.getParameter(gl.COLOR_WRITEMASK);
+        this.state.colorMask = [colorMask[0], colorMask[1], colorMask[2], colorMask[3]];
+        const clearColor = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+        this.state.clearColor = [clearColor[0], clearColor[1], clearColor[2], clearColor[3]];
+        this.state.clearDepth = gl.getParameter(gl.DEPTH_CLEAR_VALUE);
+        // Query culling state
+        this.state.cullFaceMode = gl.getParameter(gl.CULL_FACE_MODE);
+        this.state.frontFace = gl.getParameter(gl.FRONT_FACE);
+        // Query polygon offset
+        this.state.polygonOffsetFactor = gl.getParameter(gl.POLYGON_OFFSET_FACTOR);
+        this.state.polygonOffsetUnits = gl.getParameter(gl.POLYGON_OFFSET_UNITS);
+        // Query pixel store parameters
+        this.state.pixelStorei.set(gl.UNPACK_ALIGNMENT, gl.getParameter(gl.UNPACK_ALIGNMENT));
+        this.state.pixelStorei.set(gl.UNPACK_FLIP_Y_WEBGL, gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL));
+        this.state.pixelStorei.set(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL));
+        this.state.pixelStorei.set(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.getParameter(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL));
+        console.log('[WebGLStateTracker] Sync complete - tracker state updated from GL');
     }
     /**
      * Get the current state
@@ -15043,6 +15138,19 @@ class GPUResourceCache {
         const tracker = WebGLStateTracker.getInstance();
         if (tracker) {
             this.cachedModelState = tracker.snapshot();
+            // Always check if tracker is in sync with GL reality
+            const actualFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
+            const trackerFramebuffer = this.cachedModelState.boundFramebuffer;
+            // Detect mismatch - tracker and GL disagree
+            if (trackerFramebuffer !== actualFramebuffer) {
+                console.warn('[rendera] Tracker out of sync! Tracker FB:', trackerFramebuffer, 'Actual GL FB:', actualFramebuffer);
+                console.warn('[rendera] Triggering full GL state sync...');
+                // Sync the entire tracker state with GL reality
+                tracker.syncWithGLState();
+                // Take a fresh snapshot with the synced state
+                this.cachedModelState = tracker.snapshot();
+                console.log('[rendera] Resync complete, new snapshot FB:', this.cachedModelState.boundFramebuffer);
+            }
             return;
         }
     }
@@ -17936,28 +18044,6 @@ class ShadowMapManager {
         this.gl.deleteFramebuffer(data.framebuffer);
     }
     /**
-     * Prepares GL state for normal rendering after shadow map rendering.
-     * Restores the complete GL state that was cached before shadow
-     * @param cachedState The cached C3 GL state to restore
-     */
-    prepareForNormalRendering(cachedState) {
-        if (!cachedState) {
-            console.warn('[ShadowMapManager] prepareForNormalRendering called without cached state - cannot restore GL state');
-            // At minimum, unbind framebuffer to prevent feedback loop
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-            return;
-        }
-        const tracker = WebGLStateTracker.getInstance();
-        if (tracker) {
-            tracker.restore(cachedState);
-            this.gl.colorMask(true, true, true, true);
-        }
-        else {
-            console.error('[ShadowMapManager] WebGLStateTracker not available - GL state cannot be restored properly');
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-        }
-    }
-    /**
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene
@@ -18565,6 +18651,7 @@ class InstanceManager {
         }
     }
     render(viewProjection, tick) {
+        var _a, _b;
         // Skip rendering if already rendered this tick
         if (tick !== undefined && tick === this.lastRenderTick) {
             return;
@@ -18590,10 +18677,38 @@ class InstanceManager {
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
             // Pass lights array for optimized early exit when no shadows are cast
             const shadowsWereRendered = this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
-            // Only prepare GL state if shadows were actually rendered
-            // This avoids unnecessarily modifying GL state when shadows are disabled/skipped
+            // Restore GL state after shadow rendering
+            // Trust the cached state - if C3 resized, syncWithGLState() will fix it next frame
             if (shadowsWereRendered) {
-                this.shadowMapManager.prepareForNormalRendering(this.gpuResources.gpuResourceCache.getCachedModelState());
+                const cachedState = this.gpuResources.gpuResourceCache.getCachedModelState();
+                if (cachedState) {
+                    const tracker = (_b = (_a = this.gpuResources).getWebGLStateTracker) === null || _b === void 0 ? void 0 : _b.call(_a);
+                    if (tracker) {
+                        const original = tracker.getOriginalMethods();
+                        // Restore framebuffer
+                        original.bindFramebuffer(this.gl.FRAMEBUFFER, cachedState.boundFramebuffer || null);
+                        // Restore viewport
+                        original.viewport(...cachedState.viewport);
+                        // Restore color mask (shadow rendering disables it)
+                        original.colorMask(...cachedState.colorMask);
+                        // Restore depth test state
+                        if (cachedState.capabilities.get(this.gl.DEPTH_TEST)) {
+                            original.enable(this.gl.DEPTH_TEST);
+                        }
+                        else {
+                            original.disable(this.gl.DEPTH_TEST);
+                        }
+                        original.depthFunc(cachedState.depthFunc);
+                        // Restore scissor test state
+                        if (cachedState.capabilities.get(this.gl.SCISSOR_TEST)) {
+                            original.enable(this.gl.SCISSOR_TEST);
+                        }
+                        else {
+                            original.disable(this.gl.SCISSOR_TEST);
+                        }
+                        original.scissor(...cachedState.scissorBox);
+                    }
+                }
             }
         }
         // Set multiple shadow map uniforms using new multi-shadow system
@@ -18602,6 +18717,9 @@ class InstanceManager {
         }
         // Update frustum from view-projection matrices
         this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
+        // Ensure color mask is enabled before rendering 3D models
+        // Shadow rendering disables it, and we need it enabled for visible output
+        this.gl.colorMask(true, true, true, true);
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
         }

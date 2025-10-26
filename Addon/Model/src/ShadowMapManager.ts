@@ -769,31 +769,6 @@ export class ShadowMapManager {
     }
 
     /**
-     * Prepares GL state for normal rendering after shadow map rendering.
-     * Restores the complete GL state that was cached before shadow 
-     * @param cachedState The cached C3 GL state to restore
-     */
-    public prepareForNormalRendering(cachedState: WebGLState | null): void {
-        if (!cachedState) {
-            console.warn('[ShadowMapManager] prepareForNormalRendering called without cached state - cannot restore GL state');
-            // At minimum, unbind framebuffer to prevent feedback loop
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-            return;
-        }
-
-        const tracker = WebGLStateTracker.getInstance();
-        if (tracker) {
-            tracker.restore(cachedState);
-
-            this.gl.colorMask(true, true, true, true);
-        } else {
-            console.error('[ShadowMapManager] WebGLStateTracker not available - GL state cannot be restored properly');
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-        }
-    }
-
-
-    /**
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.
      * @param instanceManager - The instance manager that will render the scene

@@ -92,6 +92,12 @@ export declare class WebGLStateTracker {
      */
     restore(snapshot: WebGLState, options?: SnapshotOptions): void;
     /**
+     * Synchronize tracker state with actual GL state by querying all tracked parameters.
+     * Use this when you suspect the tracker is out of sync with reality (e.g., after C3 resize).
+     * This is expensive (lots of GL queries) so only call when necessary.
+     */
+    syncWithGLState(): void;
+    /**
      * Get the current state
      */
     getState(): WebGLState;

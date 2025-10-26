@@ -524,8 +524,20 @@ export class WebGLStateTracker {
             original.activeTexture(snapshot.activeTexture);
         }
 
-        // Restore framebuffers without validation - trust that framebuffers are valid
-        original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
+        // Restore framebuffers with inside knowledge validation
+        // If deleteFramebuffer was called, our wrapper set this.state to null
+        // So we can detect stale snapshots by comparing to current state
+        let needsResync = false;
+
+        // Check if snapshot framebuffer was deleted (current state is null but snapshot has one)
+        if (snapshot.boundFramebuffer && !this.state.boundFramebuffer) {
+            console.warn('[WebGLStateTracker] Snapshot has deleted framebuffer, will resync after restore');
+            needsResync = true;
+            // Bind null instead of deleted framebuffer
+            original.bindFramebuffer(gl.FRAMEBUFFER, null);
+        } else {
+            original.bindFramebuffer(gl.FRAMEBUFFER, snapshot.boundFramebuffer || null);
+        }
 
         if (snapshot.boundReadFramebuffer !== snapshot.boundFramebuffer) {
             original.bindFramebuffer(gl.READ_FRAMEBUFFER, snapshot.boundReadFramebuffer || null);
@@ -640,6 +652,112 @@ export class WebGLStateTracker {
         // because restore() uses original methods which bypass the monkeypatch
         // snapshot() creates deep copies of Maps and arrays, so direct assignment is safe
         this.state = snapshot;
+
+        // If snapshot had a deleted framebuffer, trigger full resync
+        if (needsResync) {
+            console.warn('[WebGLStateTracker] Triggering full state resync due to deleted framebuffer');
+            this.syncWithGLState();
+        }
+    }
+
+    /**
+     * Synchronize tracker state with actual GL state by querying all tracked parameters.
+     * Use this when you suspect the tracker is out of sync with reality (e.g., after C3 resize).
+     * This is expensive (lots of GL queries) so only call when necessary.
+     */
+    public syncWithGLState(): void {
+        const gl = this.gl;
+
+        console.log('[WebGLStateTracker] Synchronizing tracker state with actual GL state...');
+
+        // Query texture state
+        this.state.activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
+
+        // Query framebuffer state
+        this.state.boundFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+        this.state.boundReadFramebuffer = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+        this.state.boundDrawFramebuffer = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING);
+
+        // Query buffer state
+        this.state.boundArrayBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+        this.state.boundElementArrayBuffer = gl.getParameter(gl.ELEMENT_ARRAY_BUFFER_BINDING);
+        this.state.boundUniformBuffer = gl.getParameter(gl.UNIFORM_BUFFER_BINDING);
+        this.state.boundTransformFeedbackBuffer = gl.getParameter(gl.TRANSFORM_FEEDBACK_BUFFER_BINDING);
+
+        // Query VAO state
+        this.state.boundVertexArray = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+
+        // Query program state
+        this.state.currentProgram = gl.getParameter(gl.CURRENT_PROGRAM);
+
+        // Query viewport and scissor
+        const viewport = gl.getParameter(gl.VIEWPORT);
+        this.state.viewport = [viewport[0], viewport[1], viewport[2], viewport[3]];
+
+        const scissorBox = gl.getParameter(gl.SCISSOR_BOX);
+        this.state.scissorBox = [scissorBox[0], scissorBox[1], scissorBox[2], scissorBox[3]];
+
+        // Query capabilities
+        this.state.capabilities.set(gl.BLEND, gl.getParameter(gl.BLEND));
+        this.state.capabilities.set(gl.CULL_FACE, gl.getParameter(gl.CULL_FACE));
+        this.state.capabilities.set(gl.DEPTH_TEST, gl.getParameter(gl.DEPTH_TEST));
+        this.state.capabilities.set(gl.DITHER, gl.getParameter(gl.DITHER));
+        this.state.capabilities.set(gl.POLYGON_OFFSET_FILL, gl.getParameter(gl.POLYGON_OFFSET_FILL));
+        this.state.capabilities.set(gl.SAMPLE_ALPHA_TO_COVERAGE, gl.getParameter(gl.SAMPLE_ALPHA_TO_COVERAGE));
+        this.state.capabilities.set(gl.SAMPLE_COVERAGE, gl.getParameter(gl.SAMPLE_COVERAGE));
+        this.state.capabilities.set(gl.SCISSOR_TEST, gl.getParameter(gl.SCISSOR_TEST));
+        this.state.capabilities.set(gl.STENCIL_TEST, gl.getParameter(gl.STENCIL_TEST));
+
+        // Query blend state
+        this.state.blendSrcRGB = gl.getParameter(gl.BLEND_SRC_RGB);
+        this.state.blendDstRGB = gl.getParameter(gl.BLEND_DST_RGB);
+        this.state.blendSrcAlpha = gl.getParameter(gl.BLEND_SRC_ALPHA);
+        this.state.blendDstAlpha = gl.getParameter(gl.BLEND_DST_ALPHA);
+        this.state.blendEquationRGB = gl.getParameter(gl.BLEND_EQUATION_RGB);
+        this.state.blendEquationAlpha = gl.getParameter(gl.BLEND_EQUATION_ALPHA);
+
+        const blendColor = gl.getParameter(gl.BLEND_COLOR);
+        this.state.blendColor = [blendColor[0], blendColor[1], blendColor[2], blendColor[3]];
+
+        // Query depth state
+        this.state.depthFunc = gl.getParameter(gl.DEPTH_FUNC);
+        this.state.depthMask = gl.getParameter(gl.DEPTH_WRITEMASK);
+
+        const depthRange = gl.getParameter(gl.DEPTH_RANGE);
+        this.state.depthRange = [depthRange[0], depthRange[1]];
+
+        // Query stencil state
+        this.state.stencilFunc = gl.getParameter(gl.STENCIL_FUNC);
+        this.state.stencilRef = gl.getParameter(gl.STENCIL_REF);
+        this.state.stencilMask = gl.getParameter(gl.STENCIL_VALUE_MASK);
+        this.state.stencilFail = gl.getParameter(gl.STENCIL_FAIL);
+        this.state.stencilZFail = gl.getParameter(gl.STENCIL_PASS_DEPTH_FAIL);
+        this.state.stencilZPass = gl.getParameter(gl.STENCIL_PASS_DEPTH_PASS);
+
+        // Query color state
+        const colorMask = gl.getParameter(gl.COLOR_WRITEMASK);
+        this.state.colorMask = [colorMask[0], colorMask[1], colorMask[2], colorMask[3]];
+
+        const clearColor = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+        this.state.clearColor = [clearColor[0], clearColor[1], clearColor[2], clearColor[3]];
+
+        this.state.clearDepth = gl.getParameter(gl.DEPTH_CLEAR_VALUE);
+
+        // Query culling state
+        this.state.cullFaceMode = gl.getParameter(gl.CULL_FACE_MODE);
+        this.state.frontFace = gl.getParameter(gl.FRONT_FACE);
+
+        // Query polygon offset
+        this.state.polygonOffsetFactor = gl.getParameter(gl.POLYGON_OFFSET_FACTOR);
+        this.state.polygonOffsetUnits = gl.getParameter(gl.POLYGON_OFFSET_UNITS);
+
+        // Query pixel store parameters
+        this.state.pixelStorei.set(gl.UNPACK_ALIGNMENT, gl.getParameter(gl.UNPACK_ALIGNMENT));
+        this.state.pixelStorei.set(gl.UNPACK_FLIP_Y_WEBGL, gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL));
+        this.state.pixelStorei.set(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL));
+        this.state.pixelStorei.set(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.getParameter(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL));
+
+        console.log('[WebGLStateTracker] Sync complete - tracker state updated from GL');
     }
 
     /**

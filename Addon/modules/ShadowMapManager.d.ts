@@ -1,7 +1,6 @@
 import { mat4, vec3 } from 'gl-matrix';
 import type { Light, IGPUResourceManager } from './types';
 import type { InstanceManager } from './InstanceManager';
-import type { WebGLState } from './WebGLStateTracker';
 export declare enum LightType {
     DIRECTIONAL = "directional",
     SPOT = "spot",
@@ -217,12 +216,6 @@ export declare class ShadowMapManager {
      */
     removeShadowMap(lightId: number): void;
     private cleanupGLResources;
-    /**
-     * Prepares GL state for normal rendering after shadow map rendering.
-     * Restores the complete GL state that was cached before shadow
-     * @param cachedState The cached C3 GL state to restore
-     */
-    prepareForNormalRendering(cachedState: WebGLState | null): void;
     /**
      * Renders shadow maps for all enabled lights.
      * Optimized to bypass entire shadow stage when no lights cast shadows.

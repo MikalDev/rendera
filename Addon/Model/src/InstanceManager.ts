@@ -234,12 +234,38 @@ export class InstanceManager implements IInstanceManager {
             // Pass lights array for optimized early exit when no shadows are cast
             const shadowsWereRendered = this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
 
-            // Only prepare GL state if shadows were actually rendered
-            // This avoids unnecessarily modifying GL state when shadows are disabled/skipped
+            // Restore GL state after shadow rendering
+            // Trust the cached state - if C3 resized, syncWithGLState() will fix it next frame
             if (shadowsWereRendered) {
-                this.shadowMapManager.prepareForNormalRendering(
-                    this.gpuResources.gpuResourceCache.getCachedModelState()
-                );
+                const cachedState = this.gpuResources.gpuResourceCache.getCachedModelState();
+                if (cachedState) {
+                    const tracker = (this.gpuResources as any).getWebGLStateTracker?.();
+                    if (tracker) {
+                        const original = tracker.getOriginalMethods();
+
+                        // Restore framebuffer
+                        original.bindFramebuffer(this.gl.FRAMEBUFFER, cachedState.boundFramebuffer || null);
+
+                        // Restore viewport
+                        original.viewport(...cachedState.viewport);
+                        // Restore color mask (shadow rendering disables it)
+                        original.colorMask(...cachedState.colorMask);
+                        // Restore depth test state
+                        if (cachedState.capabilities.get(this.gl.DEPTH_TEST)) {
+                            original.enable(this.gl.DEPTH_TEST);
+                        } else {
+                            original.disable(this.gl.DEPTH_TEST);
+                        }
+                        original.depthFunc(cachedState.depthFunc);
+                        // Restore scissor test state
+                        if (cachedState.capabilities.get(this.gl.SCISSOR_TEST)) {
+                            original.enable(this.gl.SCISSOR_TEST);
+                        } else {
+                            original.disable(this.gl.SCISSOR_TEST);
+                        }
+                        original.scissor(...cachedState.scissorBox);
+                    }
+                }
             }
         }
 
@@ -260,6 +286,10 @@ export class InstanceManager implements IInstanceManager {
 
         // Update frustum from view-projection matrices
         this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
+
+        // Ensure color mask is enabled before rendering 3D models
+        // Shadow rendering disables it, and we need it enabled for visible output
+        this.gl.colorMask(true, true, true, true);
 
         for (const [modelId, instanceGroup] of this.instancesByModel) {
             this.renderModelInstances(modelId, instanceGroup, viewProjection);
