@@ -18392,24 +18392,10 @@ class Frustum {
      * Extract frustum planes from view-projection matrix using Gribb & Hartmann method
      * Uses a very close near plane for culling
      */
-    extractFromMatrix(viewMatrix, projectionMatrix, nearPlaneDistance = 0.01) {
+    extractFromMatrix(viewMatrix, projectionMatrix) {
         // Combine view and projection matrices
         const viewProj = create$3();
         multiply(viewProj, projectionMatrix, viewMatrix);
-        // Override near plane distance to be very close
-        const modifiedProj = clone$3(projectionMatrix);
-        // Modify the projection matrix for a very close near plane
-        // For perspective matrix: [2*n/(r-l), 0, (r+l)/(r-l), 0]
-        //                        [0, 2*n/(t-b), (t+b)/(t-b), 0]
-        //                        [0, 0, -(f+n)/(f-n), -2*f*n/(f-n)]
-        //                        [0, 0, -1, 0]
-        this.extractNearFromProjection(projectionMatrix);
-        const originalFar = this.extractFarFromProjection(projectionMatrix);
-        // Adjust near-related values in projection matrix
-        modifiedProj[10] = -(originalFar + nearPlaneDistance) / (originalFar - nearPlaneDistance);
-        modifiedProj[14] = -(2 * originalFar * nearPlaneDistance) / (originalFar - nearPlaneDistance);
-        // Recompute view-projection with modified near plane
-        multiply(viewProj, modifiedProj, viewMatrix);
         // Extract planes using Gribb & Hartmann method
         // Left plane: add 4th column to 1st column
         this.planes[0].normal[0] = viewProj[3] + viewProj[0];
@@ -18447,20 +18433,6 @@ class Frustum {
         }
     }
     /**
-     * Extract near plane distance from projection matrix
-     */
-    extractNearFromProjection(proj) {
-        // For perspective matrix: near = -proj[14] / (proj[10] - 1)
-        return -proj[14] / (proj[10] - 1);
-    }
-    /**
-     * Extract far plane distance from projection matrix
-     */
-    extractFarFromProjection(proj) {
-        // For perspective matrix: far = -proj[14] / (proj[10] + 1)
-        return -proj[14] / (proj[10] + 1);
-    }
-    /**
      * Normalize a frustum plane
      */
     normalizePlane(index) {
@@ -18479,7 +18451,7 @@ class Frustum {
      * Test if a bounding sphere is inside the frustum
      * Returns true if sphere is visible (inside or intersecting)
      */
-    testSphere(sphere) {
+    testSphere(sphere, nearPlaneOffset = 0.0) {
         for (let i = 0; i < 6; i++) {
             const plane = this.planes[i];
             // Calculate distance from sphere center to plane
@@ -18488,7 +18460,7 @@ class Frustum {
                 plane.normal[2] * sphere.center[2] +
                 plane.distance;
             // If sphere is completely behind any plane, it's outside the frustum
-            if (distance < -sphere.radius) {
+            if (distance + nearPlaneOffset < -sphere.radius) {
                 return false;
             }
         }
@@ -18650,7 +18622,7 @@ class InstanceManager {
             this.updateWorldMatrix(instance);
         }
     }
-    render(viewProjection, tick) {
+    render(viewProjection, tick, nearPlaneOffset = 0.0) {
         var _a, _b;
         // Skip rendering if already rendered this tick
         if (tick !== undefined && tick === this.lastRenderTick) {
@@ -18721,7 +18693,7 @@ class InstanceManager {
         // Shadow rendering disables it, and we need it enabled for visible output
         this.gl.colorMask(true, true, true, true);
         for (const [modelId, instanceGroup] of this.instancesByModel) {
-            this.renderModelInstances(modelId, instanceGroup, viewProjection);
+            this.renderModelInstances(modelId, instanceGroup, viewProjection, nearPlaneOffset);
         }
         this.gpuResources.gpuResourceCache.restoreModelMode();
         if (runtime)
@@ -18783,7 +18755,7 @@ class InstanceManager {
         instance.worldMatrix.set(srtMatrix);
     }
     // DRY: Extract bounding sphere culling logic
-    isInstanceVisible(instance, modelData) {
+    isInstanceVisible(instance, modelData, nearPlaneOffset = 0.0) {
         if (!modelData.boundingSphere) {
             return true; // No bounding sphere = always visible
         }
@@ -18798,10 +18770,10 @@ class InstanceManager {
             center: worldCenter,
             radius: modelData.boundingSphere.radius * Math.max(...instance.transform.scale)
         };
-        const isVisible = this.frustum.testSphere(worldBoundingSphere);
+        const isVisible = this.frustum.testSphere(worldBoundingSphere, nearPlaneOffset);
         return isVisible;
     }
-    renderModelInstances(modelId, instanceGroup, viewProjection) {
+    renderModelInstances(modelId, instanceGroup, viewProjection, nearPlaneOffset = 0.0) {
         var _a, _b;
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData)
@@ -18814,7 +18786,7 @@ class InstanceManager {
             if (!instance)
                 continue;
             // KISS Frustum culling: Test instance bounding sphere
-            if (!this.isInstanceVisible(instance, modelData)) {
+            if (!this.isInstanceVisible(instance, modelData, nearPlaneOffset)) {
                 continue;
             }
             // Update world matrix for rendering

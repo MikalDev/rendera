@@ -204,7 +204,7 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    render(viewProjection: { view: mat4, projection: mat4 }, tick?: number): void {
+    render(viewProjection: { view: mat4, projection: mat4 }, tick?: number, nearPlaneOffset: number = 0.0): void {
         // Skip rendering if already rendered this tick
         if (tick !== undefined && tick === this.lastRenderTick) {
             return;
@@ -292,7 +292,7 @@ export class InstanceManager implements IInstanceManager {
         this.gl.colorMask(true, true, true, true);
 
         for (const [modelId, instanceGroup] of this.instancesByModel) {
-            this.renderModelInstances(modelId, instanceGroup, viewProjection);
+            this.renderModelInstances(modelId, instanceGroup, viewProjection, nearPlaneOffset);
         }
 
         this.gpuResources.gpuResourceCache.restoreModelMode();
@@ -366,11 +366,11 @@ export class InstanceManager implements IInstanceManager {
     }
 
     // DRY: Extract bounding sphere culling logic
-    private isInstanceVisible(instance: InstanceData, modelData: any): boolean {
+    private isInstanceVisible(instance: InstanceData, modelData: any, nearPlaneOffset: number = 0.0): boolean {
         if (!modelData.boundingSphere) {
             return true; // No bounding sphere = always visible
         }
-        
+
         // KISS: Simple approximation - transform center and apply max scale
         const center = modelData.boundingSphere.center;
         const worldCenter: [number, number, number] = [
@@ -378,13 +378,12 @@ export class InstanceManager implements IInstanceManager {
             instance.transform.position[1] + center[1] * instance.transform.scale[1],
             instance.transform.position[2] + center[2] * instance.transform.scale[2]
         ];
-        
+
         const worldBoundingSphere = {
             center: worldCenter,
             radius: modelData.boundingSphere.radius * Math.max(...instance.transform.scale)
         };
-
-        const isVisible = this.frustum.testSphere(worldBoundingSphere);
+        const isVisible = this.frustum.testSphere(worldBoundingSphere, nearPlaneOffset);
         
 
         return isVisible;
@@ -393,7 +392,8 @@ export class InstanceManager implements IInstanceManager {
     public renderModelInstances(
         modelId: string, 
         instanceGroup: Set<number>, 
-        viewProjection: { view: mat4, projection: mat4 }
+        viewProjection: { view: mat4, projection: mat4 },
+        nearPlaneOffset: number = 0.0
     ): void {
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData) return;
@@ -407,7 +407,7 @@ export class InstanceManager implements IInstanceManager {
             if (!instance) continue;
 
             // KISS Frustum culling: Test instance bounding sphere
-            if (!this.isInstanceVisible(instance, modelData)) {
+            if (!this.isInstanceVisible(instance, modelData, nearPlaneOffset)) {
                 continue;
             }
 

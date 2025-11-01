@@ -20,6 +20,9 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	private _lastLoadedModelPath: string = '';
 	private _useAnimationWorker: boolean = false; // Default to false for testing
 
+	// Frustum culling near plane offset
+	public frustumCullingNearOffset: number = 0.0;
+
 	public initialized = false;
 
 	constructor() {
@@ -87,7 +90,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		const view = renderer._matMV
 		const projection = renderer._matP
 		viewProjection = {view, projection}
-		this.instanceManager.render(viewProjection, this._currentTick);
+		this.instanceManager.render(viewProjection, this._currentTick, this.frustumCullingNearOffset);
 	}
 
 	_getViewProjectionMatrices(): {viewMatrix: typeof mat4, projectionMatrix: typeof mat4} {

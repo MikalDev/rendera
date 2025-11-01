@@ -23,29 +23,11 @@ export class Frustum {
      * Extract frustum planes from view-projection matrix using Gribb & Hartmann method
      * Uses a very close near plane for culling
      */
-    public extractFromMatrix(viewMatrix: mat4, projectionMatrix: mat4, nearPlaneDistance: number = 0.01): void {
+    public extractFromMatrix(viewMatrix: mat4, projectionMatrix: mat4): void {
         // Combine view and projection matrices
         const viewProj = mat4.create();
         mat4.multiply(viewProj, projectionMatrix, viewMatrix);
-        
-        // Override near plane distance to be very close
-        const modifiedProj = mat4.clone(projectionMatrix);
-        // Modify the projection matrix for a very close near plane
-        // For perspective matrix: [2*n/(r-l), 0, (r+l)/(r-l), 0]
-        //                        [0, 2*n/(t-b), (t+b)/(t-b), 0]
-        //                        [0, 0, -(f+n)/(f-n), -2*f*n/(f-n)]
-        //                        [0, 0, -1, 0]
-        const originalNear = this.extractNearFromProjection(projectionMatrix);
-        const originalFar = this.extractFarFromProjection(projectionMatrix);
-        const ratio = nearPlaneDistance / originalNear;
-        
-        // Adjust near-related values in projection matrix
-        modifiedProj[10] = -(originalFar + nearPlaneDistance) / (originalFar - nearPlaneDistance);
-        modifiedProj[14] = -(2 * originalFar * nearPlaneDistance) / (originalFar - nearPlaneDistance);
-        
-        // Recompute view-projection with modified near plane
-        mat4.multiply(viewProj, modifiedProj, viewMatrix);
-        
+                
         // Extract planes using Gribb & Hartmann method
         // Left plane: add 4th column to 1st column
         this.planes[0].normal[0] = viewProj[3] + viewProj[0];
@@ -90,22 +72,6 @@ export class Frustum {
     }
 
     /**
-     * Extract near plane distance from projection matrix
-     */
-    private extractNearFromProjection(proj: mat4): number {
-        // For perspective matrix: near = -proj[14] / (proj[10] - 1)
-        return -proj[14] / (proj[10] - 1);
-    }
-
-    /**
-     * Extract far plane distance from projection matrix
-     */
-    private extractFarFromProjection(proj: mat4): number {
-        // For perspective matrix: far = -proj[14] / (proj[10] + 1)
-        return -proj[14] / (proj[10] + 1);
-    }
-
-    /**
      * Normalize a frustum plane
      */
     private normalizePlane(index: number): void {
@@ -128,7 +94,7 @@ export class Frustum {
      * Test if a bounding sphere is inside the frustum
      * Returns true if sphere is visible (inside or intersecting)
      */
-    public testSphere(sphere: BoundingSphere): boolean {
+    public testSphere(sphere: BoundingSphere, nearPlaneOffset: number = 0.0): boolean {
         for (let i = 0; i < 6; i++) {
             const plane = this.planes[i];
             
@@ -140,7 +106,7 @@ export class Frustum {
                 plane.distance;
             
             // If sphere is completely behind any plane, it's outside the frustum
-            if (distance < -sphere.radius) {
+            if (distance + nearPlaneOffset < -sphere.radius) {
                 return false;
             }
         }

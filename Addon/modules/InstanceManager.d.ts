@@ -37,7 +37,7 @@ export declare class InstanceManager implements IInstanceManager {
     render(viewProjection: {
         view: mat4;
         projection: mat4;
-    }, tick?: number): void;
+    }, tick?: number, nearPlaneOffset?: number): void;
     markInstanceDirty(instanceId: number): void;
     invalidateAnimationCache(instanceId: number): void;
     setModelBindPose(instance: Model): void;
@@ -51,7 +51,7 @@ export declare class InstanceManager implements IInstanceManager {
     renderModelInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
         view: mat4;
         projection: mat4;
-    }): void;
+    }, nearPlaneOffset?: number): void;
     renderShadowMapInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
         view: mat4;
         projection: mat4;
