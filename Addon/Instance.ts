@@ -1,4 +1,4 @@
-import { GPUResourceManager, InstanceManager, ModelLoader, WebGLStateTracker } from './modules/index.js';
+import { GPUResourceManager, InstanceManager, ModelLoader, WebGLStateTracker, Model } from './modules/index.js';
 import { mat4 } from './modules/gl-matrix.js';
 
 class LostInstance extends globalThis.ISDKInstanceBase {
@@ -208,12 +208,82 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 			console.error('[rendera] Cannot extract numeric instanceId from:', instanceId);
 			return;
 		}
-		
+
 		if (!this.instanceManager) {
 			console.warn('[rendera] Cannot unregister animation callback - instanceManager not initialized');
 			return;
 		}
 		this.instanceManager.unregisterAnimationCallback(numericId);
+	}
+
+	/**
+	 * Gets the world position of a bone/joint by name for a specific model instance.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneName The name of the bone/joint
+	 * @returns [x, y, z] world position or null if bone/instance not found
+	 */
+	public getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone position - instanceManager not initialized');
+			return null;
+		}
+
+		// Get the instance data
+		const instanceData = (this.instanceManager as any).instances?.get(instanceId);
+		if (!instanceData) {
+			console.warn(`[rendera] Instance ${instanceId} not found`);
+			return null;
+		}
+
+		// Create a temporary Model instance to access the method
+		const modelId = instanceData.instanceId?.modelId;
+		if (!modelId) {
+			console.warn(`[rendera] Model ID not found for instance ${instanceId}`);
+			return null;
+		}
+
+		const tempModel = new Model(
+			{ id: instanceId, modelId },
+			this.instanceManager,
+			instanceData
+		);
+
+		return tempModel.getBoneWorldPosition(boneName);
+	}
+
+	/**
+	 * Gets the world position of a bone/joint by index for a specific model instance.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneIndex The index of the bone/joint
+	 * @returns [x, y, z] world position or null if bone/instance not found
+	 */
+	public getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone position - instanceManager not initialized');
+			return null;
+		}
+
+		// Get the instance data
+		const instanceData = (this.instanceManager as any).instances?.get(instanceId);
+		if (!instanceData) {
+			console.warn(`[rendera] Instance ${instanceId} not found`);
+			return null;
+		}
+
+		// Create a temporary Model instance to access the method
+		const modelId = instanceData.instanceId?.modelId;
+		if (!modelId) {
+			console.warn(`[rendera] Model ID not found for instance ${instanceId}`);
+			return null;
+		}
+
+		const tempModel = new Model(
+			{ id: instanceId, modelId },
+			this.instanceManager,
+			instanceData
+		);
+
+		return tempModel.getBoneWorldPositionByIndex(boneIndex);
 	}
 };
 

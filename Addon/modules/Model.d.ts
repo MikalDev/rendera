@@ -66,5 +66,17 @@ export declare class Model implements IModel {
      * Resets all material overrides for this instance, reverting to the model's default materials.
      */
     resetMaterials(): void;
+    /**
+     * Gets the world position of a bone/joint by name.
+     * @param boneName The name of the bone/joint
+     * @returns [x, y, z] world position or null if bone not found
+     */
+    getBoneWorldPosition(boneName: string): [number, number, number] | null;
+    /**
+     * Gets the world position of a bone/joint by index.
+     * @param boneIndex The index of the bone/joint in the model's joint array
+     * @returns [x, y, z] world position or null if bone not found
+     */
+    getBoneWorldPositionByIndex(boneIndex: number): [number, number, number] | null;
 }
 //# sourceMappingURL=Model.d.ts.map

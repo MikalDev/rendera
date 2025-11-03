@@ -1,4 +1,5 @@
 import { InstanceId, IModel, IInstanceManager, AnimationOptions, InstanceData } from './types';
+import { mat4 } from 'gl-matrix';
 
 export class Model implements IModel {
     readonly instanceId: InstanceId;
@@ -183,6 +184,65 @@ export class Model implements IModel {
      */
     public resetMaterials(): void {
         this._instanceData.materialOverrides.clear();
+    }
+
+    /**
+     * Gets the world position of a bone/joint by name.
+     * @param boneName The name of the bone/joint
+     * @returns [x, y, z] world position or null if bone not found
+     */
+    public getBoneWorldPosition(boneName: string): [number, number, number] | null {
+        // 1. Get model data to lookup bone by name
+        const modelLoader = (this._manager as any).modelLoader;
+        if (!modelLoader) return null;
+
+        const modelData = modelLoader.getModelData(this.instanceId.modelId);
+        if (!modelData) return null;
+
+        // 2. Find the node by name
+        const boneNode = modelData.nodeNameMap?.get(boneName);
+        if (!boneNode) return null;
+
+        // 3. Get the bone's model-space transform from animation matrices
+        const boneModelMatrix = this._instanceData.animationState.animationMatrices.get(boneNode.indexData.nodeIndex);
+        if (!boneModelMatrix) return null;
+
+        // 4. Transform to world space using instance's world matrix
+        const boneWorldMatrix = mat4.create();
+        mat4.multiply(boneWorldMatrix, this._instanceData.worldMatrix, boneModelMatrix);
+
+        // 5. Extract translation component
+        const position: [number, number, number] = [
+            boneWorldMatrix[12],
+            boneWorldMatrix[13],
+            boneWorldMatrix[14]
+        ];
+
+        return position;
+    }
+
+    /**
+     * Gets the world position of a bone/joint by index.
+     * @param boneIndex The index of the bone/joint in the model's joint array
+     * @returns [x, y, z] world position or null if bone not found
+     */
+    public getBoneWorldPositionByIndex(boneIndex: number): [number, number, number] | null {
+        // 1. Get the bone's model-space transform from animation matrices
+        const boneModelMatrix = this._instanceData.animationState.animationMatrices.get(boneIndex);
+        if (!boneModelMatrix) return null;
+
+        // 2. Transform to world space using instance's world matrix
+        const boneWorldMatrix = mat4.create();
+        mat4.multiply(boneWorldMatrix, this._instanceData.worldMatrix, boneModelMatrix);
+
+        // 3. Extract translation component
+        const position: [number, number, number] = [
+            boneWorldMatrix[12],
+            boneWorldMatrix[13],
+            boneWorldMatrix[14]
+        ];
+
+        return position;
     }
 
 }

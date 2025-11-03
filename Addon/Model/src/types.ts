@@ -233,6 +233,8 @@ export interface IModel {
     enableNode(nodeName: string): void;
     disableNode(nodeName: string): void;
     isNodeEnabled(nodeName: string): boolean;
+    getBoneWorldPosition(boneName: string): [number, number, number] | null;
+    getBoneWorldPositionByIndex(boneIndex: number): [number, number, number] | null;
 }
 
 export enum TextureType {
