@@ -680,6 +680,12 @@ export class GPUResourceManager implements IGPUResourceManager {
             // Correctly handle alpha: combine texture alpha, base color factor alpha, and opacity
             float finalAlpha = baseColorSample.a * u_Opacity;
 
+            // Alpha test: discard nearly transparent pixels to avoid depth buffer issues
+            // This prevents transparent pixels from blocking objects behind them
+            if (finalAlpha < 0.01) {
+                discard;
+            }
+
             // Debug: Visualize GI contribution
             // Uncomment one of these lines to debug:
             // fragColor = vec4(hemisphericAmbient, 1.0); // Show only GI
