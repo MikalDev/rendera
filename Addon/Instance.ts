@@ -1,4 +1,4 @@
-import { GPUResourceManager, InstanceManager, ModelLoader, WebGLStateTracker, Model } from './modules/index.js';
+import { GPUResourceManager, InstanceManager, ModelLoader, WebGLStateTracker } from './modules/index.js';
 import { mat4 } from './modules/gl-matrix.js';
 
 class LostInstance extends globalThis.ISDKInstanceBase {
@@ -228,27 +228,8 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 			return null;
 		}
 
-		// Get the instance data
-		const instanceData = (this.instanceManager as any).instances?.get(instanceId);
-		if (!instanceData) {
-			console.warn(`[rendera] Instance ${instanceId} not found`);
-			return null;
-		}
-
-		// Create a temporary Model instance to access the method
-		const modelId = instanceData.instanceId?.modelId;
-		if (!modelId) {
-			console.warn(`[rendera] Model ID not found for instance ${instanceId}`);
-			return null;
-		}
-
-		const tempModel = new Model(
-			{ id: instanceId, modelId },
-			this.instanceManager,
-			instanceData
-		);
-
-		return tempModel.getBoneWorldPosition(boneName);
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldPosition(instanceId, boneName);
 	}
 
 	/**
@@ -263,27 +244,8 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 			return null;
 		}
 
-		// Get the instance data
-		const instanceData = (this.instanceManager as any).instances?.get(instanceId);
-		if (!instanceData) {
-			console.warn(`[rendera] Instance ${instanceId} not found`);
-			return null;
-		}
-
-		// Create a temporary Model instance to access the method
-		const modelId = instanceData.instanceId?.modelId;
-		if (!modelId) {
-			console.warn(`[rendera] Model ID not found for instance ${instanceId}`);
-			return null;
-		}
-
-		const tempModel = new Model(
-			{ id: instanceId, modelId },
-			this.instanceManager,
-			instanceData
-		);
-
-		return tempModel.getBoneWorldPositionByIndex(boneIndex);
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldPositionByIndex(instanceId, boneIndex);
 	}
 };
 

@@ -130,6 +130,8 @@ export interface IInstanceManager {
     invalidateAnimationCache(instanceId: number): void;
     enableModelNode(nodeName: string, instance: Model): void;
     setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void;
+    getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null;
+    getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
     renderShadowMapInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
         view: mat4;
         projection: mat4;
@@ -151,8 +153,6 @@ export interface IModel {
     enableNode(nodeName: string): void;
     disableNode(nodeName: string): void;
     isNodeEnabled(nodeName: string): boolean;
-    getBoneWorldPosition(boneName: string): [number, number, number] | null;
-    getBoneWorldPositionByIndex(boneIndex: number): [number, number, number] | null;
 }
 export declare enum TextureType {
     BaseColor = 0,

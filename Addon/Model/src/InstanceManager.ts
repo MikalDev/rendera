@@ -812,6 +812,87 @@ export class InstanceManager implements IInstanceManager {
             }
         }
     }
+
+    /**
+     * Gets the world position of a bone/joint by name for a specific instance.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneName The name of the bone/joint
+     * @returns [x, y, z] world position or null if bone/instance not found
+     */
+    public getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null {
+        const instanceData = this.instances.get(instanceId);
+        if (!instanceData) {
+            console.warn(`[InstanceManager] Instance ${instanceId} not found`);
+            return null;
+        }
+
+        const modelData = this.modelLoader.getModelData(instanceData.instanceId.modelId);
+        if (!modelData) {
+            console.warn(`[InstanceManager] Model data not found for instance ${instanceId}`);
+            return null;
+        }
+
+        // Find the node by name
+        const boneNode = modelData.nodeNameMap?.get(boneName);
+        if (!boneNode) {
+            console.warn(`[InstanceManager] Bone "${boneName}" not found in model`);
+            return null;
+        }
+
+        // Get the bone's model-space transform from animation matrices
+        const boneModelMatrix = instanceData.animationState.animationMatrices.get(boneNode.indexData.nodeIndex);
+        if (!boneModelMatrix) {
+            console.warn(`[InstanceManager] Animation matrix not found for bone "${boneName}"`);
+            return null;
+        }
+
+        // Transform to world space using instance's world matrix
+        const boneWorldMatrix = mat4.create();
+        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneModelMatrix);
+
+        // Extract translation component
+        const position: [number, number, number] = [
+            boneWorldMatrix[12],
+            boneWorldMatrix[13],
+            boneWorldMatrix[14]
+        ];
+
+        return position;
+    }
+
+    /**
+     * Gets the world position of a bone/joint by index for a specific instance.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneIndex The index of the bone/joint
+     * @returns [x, y, z] world position or null if bone/instance not found
+     */
+    public getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null {
+        const instanceData = this.instances.get(instanceId);
+        if (!instanceData) {
+            console.warn(`[InstanceManager] Instance ${instanceId} not found`);
+            return null;
+        }
+
+        // Get the bone's model-space transform from animation matrices
+        const boneModelMatrix = instanceData.animationState.animationMatrices.get(boneIndex);
+        if (!boneModelMatrix) {
+            console.warn(`[InstanceManager] Animation matrix not found for bone index ${boneIndex}`);
+            return null;
+        }
+
+        // Transform to world space using instance's world matrix
+        const boneWorldMatrix = mat4.create();
+        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneModelMatrix);
+
+        // Extract translation component
+        const position: [number, number, number] = [
+            boneWorldMatrix[12],
+            boneWorldMatrix[13],
+            boneWorldMatrix[14]
+        ];
+
+        return position;
+    }
 }
 
 // @ts-ignore

@@ -77,5 +77,19 @@ export declare class InstanceManager implements IInstanceManager {
      * @param materialIndex The material index to use
      */
     setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void;
+    /**
+     * Gets the world position of a bone/joint by name for a specific instance.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneName The name of the bone/joint
+     * @returns [x, y, z] world position or null if bone/instance not found
+     */
+    getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null;
+    /**
+     * Gets the world position of a bone/joint by index for a specific instance.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneIndex The index of the bone/joint
+     * @returns [x, y, z] world position or null if bone/instance not found
+     */
+    getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map
