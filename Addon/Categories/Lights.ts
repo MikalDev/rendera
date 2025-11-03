@@ -13,10 +13,11 @@ export default class LightsCategory {
                 addParam('color', 'Color', { type: Param.Number, initialValue: 0.0 }),
                 addParam('intensity', 'Intensity', { type: Param.Number, initialValue: 1.0 }),
                 addParam('attenuation', 'Attenuation', { type: Param.Number, initialValue: 0.0 }),
-                addParam('castShadow', 'Cast Shadow', { type: Param.Boolean, initialValue: false })
+                addParam('castShadow', 'Cast Shadow', { type: Param.Boolean, initialValue: false }),
+                addParam('specularIntensity', 'Specular Intensity', { type: Param.Number, initialValue: 1.0, desc: 'Per-light specular multiplier (0-2)' })
         ]
     })
-    setPointLight(this: Instance, lightNumber: number, x: number, y: number, z: number, color: number, intensity: number, attenuation: number, castShadow: boolean) {
+    setPointLight(this: Instance, lightNumber: number, x: number, y: number, z: number, color: number, intensity: number, attenuation: number, castShadow: boolean, specularIntensity: number) {
         // @ts-ignore
         const r = C3.GetRValue(color);
         // @ts-ignore
@@ -30,7 +31,8 @@ export default class LightsCategory {
             color: [r, g, b],
             intensity: intensity,
             attenuation: attenuation,
-            castShadows: castShadow
+            castShadows: castShadow,
+            specularIntensity: specularIntensity
         });
     }
     @Action('setSpotLight', 'Set Spot Light', 'Set spot light at position {0},{1},{2}', 'Set spot light', {
@@ -47,12 +49,13 @@ export default class LightsCategory {
             addParam('color', 'Color', { type: Param.Number, initialValue: 0.0 }),
             addParam('intensity', 'Intensity', { type: Param.Number, initialValue: 1.0 }),
             addParam('attenuation', 'Attenuation', { type: Param.Number, initialValue: 0.0 }),
-            addParam('castShadow', 'Cast Shadow', { type: Param.Boolean, initialValue: false })
+            addParam('castShadow', 'Cast Shadow', { type: Param.Boolean, initialValue: false }),
+            addParam('specularIntensity', 'Specular Intensity', { type: Param.Number, initialValue: 1.0, desc: 'Per-light specular multiplier (0-2)' })
         ]
     })
-    setSpotLight(this: Instance, lightNumber: number, x: number, y: number, z: number, directionX: number, 
+    setSpotLight(this: Instance, lightNumber: number, x: number, y: number, z: number, directionX: number,
         directionY: number, directionZ: number, angle: number, spotPenumbra: number,
-        color: number, intensity: number, attenuation: number, castShadow: boolean) {
+        color: number, intensity: number, attenuation: number, castShadow: boolean, specularIntensity: number) {
         // @ts-ignore
         const r = C3.GetRValue(color);
         // @ts-ignore
@@ -69,7 +72,8 @@ export default class LightsCategory {
             color: [r, g, b],
             intensity: intensity,
             attenuation: attenuation,
-            castShadows: castShadow  // Fixed: changed from castShadow to castShadows
+            castShadows: castShadow,  // Fixed: changed from castShadow to castShadows
+            specularIntensity: specularIntensity
         });
     }
 
@@ -140,6 +144,44 @@ export default class LightsCategory {
         this.gpuResourceManager.setLambertWrap(wrap);
     }
 
+    // Specular lighting actions
+    @Action('setSpecularEnabled', 'Enable Specular', 'Set specular lighting {0}', 'Enable or disable specular highlights', {
+        params: [
+            addParam('enabled', 'Enabled', { type: Param.Combo, items: ['Disabled', 'Enabled'], initialValue: 'Enabled' })
+        ]
+    })
+    setSpecularEnabled(this: Instance, enabled: number) {
+        this.gpuResourceManager.setSpecularEnabled(enabled === 1);
+    }
+
+    @Action('setSpecularStrength', 'Set Specular Strength', 'Set specular strength to {0}', 'Control the intensity of specular highlights (0-2)', {
+        params: [
+            addParam('strength', 'Strength', { type: Param.Number, initialValue: 1.0, desc: '0=none, 1=normal, 2=intense' })
+        ]
+    })
+    setSpecularStrength(this: Instance, strength: number) {
+        this.gpuResourceManager.setSpecularStrength(strength);
+    }
+
+    @Action('setSpecularShininess', 'Set Specular Shininess', 'Set specular shininess to {0}', 'Control the size/focus of specular highlights (0-2)', {
+        params: [
+            addParam('shininess', 'Shininess', { type: Param.Number, initialValue: 1.0, desc: '0=rough/broad, 2=shiny/tight' })
+        ]
+    })
+    setSpecularShininess(this: Instance, shininess: number) {
+        this.gpuResourceManager.setSpecularShininess(shininess);
+    }
+
+    @Action('setLightSpecularIntensity', 'Set Light Specular Intensity', 'Set light {0} specular intensity to {1}', 'Set per-light specular multiplier', {
+        params: [
+            addParam('lightNumber', 'Light Number', { type: Param.Number, initialValue: 0 }),
+            addParam('specularIntensity', 'Specular Intensity', { type: Param.Number, initialValue: 1.0, desc: 'Per-light specular multiplier (0-2)' })
+        ]
+    })
+    setLightSpecularIntensity(this: Instance, lightNumber: number, specularIntensity: number) {
+        this.gpuResourceManager.setLightSpecularIntensity(lightNumber, specularIntensity);
+    }
+
     /** @Conditions */
     // @Condition('onCondition', 'On condition', 'On condition')
     // onCondition() {
@@ -150,5 +192,20 @@ export default class LightsCategory {
     @Expression('shadowMapResolution', 'Shadow Map Resolution')
     shadowMapResolution(this: Instance) {
         return this.shadowMapManager ? this.shadowMapManager.getResolution() : 1024;
+    }
+
+    @Expression('specularEnabled', 'Specular Enabled', 'Get whether specular lighting is enabled (0 or 1)')
+    specularEnabled(this: Instance) {
+        return this.gpuResourceManager.getSpecularEnabled() ? 1 : 0;
+    }
+
+    @Expression('specularStrength', 'Specular Strength', 'Get the current specular strength')
+    specularStrength(this: Instance) {
+        return this.gpuResourceManager.getSpecularStrength();
+    }
+
+    @Expression('specularShininess', 'Specular Shininess', 'Get the current specular shininess')
+    specularShininess(this: Instance) {
+        return this.gpuResourceManager.getSpecularShininess();
     }
 }

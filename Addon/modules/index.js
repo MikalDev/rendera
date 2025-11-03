@@ -15228,7 +15228,7 @@ class GPUResourceManager {
         // Dummy shadow texture for unused shadow map slots
         this.dummyShadowTexture = null;
         this.MAX_LIGHTS = 8;
-        this.lights = new Array(8);
+        this.lights = new Array(this.MAX_LIGHTS);
         this.dirtyLightParams = false;
         this.dirtyLightStates = new Set();
         this.cameraPosition = [0, 0, 0];
@@ -15241,6 +15241,14 @@ class GPUResourceManager {
             lambertWrap: 0.1 // Slight shadow softening
         };
         this.dirtyGIState = true; // Set to true initially to apply default values
+        // Specular lighting state
+        this.specularState = {
+            enabled: true, // Enable specular by default
+            strength: 1.0, // Full strength by default
+            shininess: 1.0, // Medium shininess
+            viewPosition: [0, 0, 0] // View position for specular calculation
+        };
+        this.dirtySpecularState = true; // Set to true initially to apply default values
         // UBO for bone matrices
         this.boneUBO = null;
         this.BONE_UBO_BINDING_POINT = 0;
@@ -15256,7 +15264,8 @@ class GPUResourceManager {
             intensity: 0,
             attenuation: 1,
             castShadows: false,
-            direction: [0, 0, -1]
+            direction: [0, 0, -1],
+            specularIntensity: 1.0 // Default to full specular contribution
         }));
         this.gpuResourceCache = new GPUResourceCache(gl);
         // Initialize and bind the bone UBO to ensure it's always available
@@ -15499,6 +15508,7 @@ class GPUResourceManager {
             float attenuation; // Used by point/spot
             float cosAngle;   // Used by spot
             float spotPenumbra;// Used by spot
+            float specularIntensity; // Per-light specular multiplier
         };
 
         const int MAX_LIGHTS = 8;
@@ -15518,7 +15528,13 @@ class GPUResourceManager {
         uniform float u_RoughnessFactor;
         uniform vec3 u_TintColor;
         uniform float u_Opacity;
-        
+
+        // Specular lighting uniforms
+        uniform bool u_Specular;
+        uniform float u_SpecularStrength;
+        uniform float u_SpecularShininess;
+        uniform vec3 u_ViewPosition;
+
         // Global Illumination uniforms (with defaults for safety)
         uniform vec3 u_SkyColor;
         uniform vec3 u_GroundColor;
@@ -15660,8 +15676,23 @@ class GPUResourceManager {
             float D = distributionGGX(N, H, roughness);
             float G = geometrySmith(NdotV, max(NdotL, 0.001), roughness);
 
-            // Cook-Torrance specular BRDF (uses unwrapped NdotL for sharp highlights)
-            vec3 specular = (D * F * G) / max(4.0 * NdotV * max(NdotL, 0.001), 0.001);
+            // Calculate specular contribution
+            vec3 specular = vec3(0.0);
+
+            if (u_Specular && light.specularIntensity > 0.0) {
+                // Adjust roughness based on specular shininess (higher shininess = lower roughness)
+                float adjustedRoughness = roughness * (2.0 - u_SpecularShininess);
+
+                // Recalculate D and G with adjusted roughness for specular
+                float D_spec = distributionGGX(N, H, adjustedRoughness);
+                float G_spec = geometrySmith(NdotV, max(NdotL, 0.001), adjustedRoughness);
+
+                // Cook-Torrance specular BRDF (uses unwrapped NdotL for sharp highlights)
+                specular = (D_spec * F * G_spec) / max(4.0 * NdotV * max(NdotL, 0.001), 0.001);
+
+                // Apply both global specular strength and per-light specular intensity
+                specular *= u_SpecularStrength * light.specularIntensity;
+            }
 
             // Energy-conserving diffuse
             vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
@@ -15811,6 +15842,9 @@ class GPUResourceManager {
     updateCameraPosition(position) {
         this.cameraPosition = position;
         this.dirtyCameraPosition = true;
+        // Also update view position for specular calculations
+        this.specularState.viewPosition = position;
+        this.dirtySpecularState = true;
     }
     // Global Illumination methods
     setGISkyColor(color) {
@@ -15834,6 +15868,39 @@ class GPUResourceManager {
         this.giState.lambertWrap = Math.max(0, Math.min(1, wrap));
         console.log('[GI] Setting Lambert wrap:', this.giState.lambertWrap);
         this.dirtyGIState = true;
+    }
+    // Specular lighting methods
+    setSpecularEnabled(enabled) {
+        this.specularState.enabled = enabled;
+        console.log('[Specular] Setting enabled:', enabled);
+        this.dirtySpecularState = true;
+    }
+    setSpecularStrength(strength) {
+        // Clamp between 0 and 2 (allow some overdrive)
+        this.specularState.strength = Math.max(0, Math.min(2, strength));
+        console.log('[Specular] Setting strength:', this.specularState.strength);
+        this.dirtySpecularState = true;
+    }
+    setSpecularShininess(shininess) {
+        // Clamp between 0 and 2 (0 = very rough, 2 = very shiny)
+        this.specularState.shininess = Math.max(0, Math.min(2, shininess));
+        console.log('[Specular] Setting shininess:', this.specularState.shininess);
+        this.dirtySpecularState = true;
+    }
+    setViewPosition(position) {
+        this.specularState.viewPosition = position;
+        console.log('[Specular] Setting view position:', position);
+        this.dirtySpecularState = true;
+    }
+    // Specular getters for expressions
+    getSpecularEnabled() {
+        return this.specularState.enabled;
+    }
+    getSpecularStrength() {
+        return this.specularState.strength;
+    }
+    getSpecularShininess() {
+        return this.specularState.shininess;
     }
     setLightEnabled(index, enabled) {
         if (index >= this.MAX_LIGHTS)
@@ -15894,7 +15961,38 @@ class GPUResourceManager {
             this.dirtyGIState = false;
         }
     }
+    updateSpecularUniforms(shader) {
+        if (this.dirtySpecularState) {
+            const enabledLoc = this.uniformCache.getLocation(shader, 'u_Specular');
+            const strengthLoc = this.uniformCache.getLocation(shader, 'u_SpecularStrength');
+            const shininessLoc = this.uniformCache.getLocation(shader, 'u_SpecularShininess');
+            const viewPosLoc = this.uniformCache.getLocation(shader, 'u_ViewPosition');
+            if (enabledLoc)
+                this.gl.uniform1i(enabledLoc, this.specularState.enabled ? 1 : 0);
+            if (strengthLoc)
+                this.gl.uniform1f(strengthLoc, this.specularState.strength);
+            if (shininessLoc)
+                this.gl.uniform1f(shininessLoc, this.specularState.shininess);
+            if (viewPosLoc)
+                this.gl.uniform3fv(viewPosLoc, this.specularState.viewPosition);
+            // Debug logging
+            console.log('[Specular] Updating uniforms:', {
+                enabled: this.specularState.enabled,
+                strength: this.specularState.strength,
+                shininess: this.specularState.shininess,
+                viewPosition: this.specularState.viewPosition,
+                locations: {
+                    enabled: enabledLoc !== null,
+                    strength: strengthLoc !== null,
+                    shininess: shininessLoc !== null,
+                    viewPos: viewPosLoc !== null
+                }
+            });
+            this.dirtySpecularState = false;
+        }
+    }
     updateAllLightUniforms(shader) {
+        var _a;
         for (let i = 0; i < this.MAX_LIGHTS; i++) {
             const light = this.lights[i];
             const prefix = `u_Lights[${i}]`;
@@ -15933,6 +16031,10 @@ class GPUResourceManager {
                 if (penumbraLoc)
                     this.gl.uniform1f(penumbraLoc, light.spotPenumbra);
             }
+            // Set specular intensity for this light
+            const specularLoc = this.uniformCache.getLocation(shader, `${prefix}.specularIntensity`);
+            if (specularLoc)
+                this.gl.uniform1f(specularLoc, (_a = light.specularIntensity) !== null && _a !== void 0 ? _a : 1.0);
         }
     }
     updateLightEnableStates(shader) {
@@ -15957,6 +16059,7 @@ class GPUResourceManager {
         this.updateCameraPositionUniforms(shader);
         this.updateLightUniforms(shader);
         this.updateGIUniforms(shader);
+        this.updateSpecularUniforms(shader);
         materialSystem.bindMaterial(materialIndex, shader);
     }
     setLightDirection(index, direction) {
@@ -15977,6 +16080,13 @@ class GPUResourceManager {
         if (index >= this.MAX_LIGHTS)
             return;
         this.lights[index].intensity = intensity;
+        this.dirtyLightParams = true;
+    }
+    setLightSpecularIntensity(index, specularIntensity) {
+        if (index >= this.MAX_LIGHTS)
+            return;
+        // Clamp between 0 and 2 to allow some overdrive
+        this.lights[index].specularIntensity = Math.max(0, Math.min(2, specularIntensity));
         this.dirtyLightParams = true;
     }
     setSpotLightParams(index, angle, penumbra) {

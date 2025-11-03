@@ -349,6 +349,10 @@ export interface LightBase {
     color: [number, number, number];
     intensity: number;
     castShadows: boolean;
+    specularIntensity: number;  // Per-light specular multiplier (0-1, default 1)
+    attenuationConstant: number;
+    attenuationLinear: number;
+    attenuationQuadratic?: number;
 }
 
 export interface PointLight extends LightBase {

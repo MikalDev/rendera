@@ -18,6 +18,8 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     private dirtyCameraPosition;
     private giState;
     private dirtyGIState;
+    private specularState;
+    private dirtySpecularState;
     private boneUBO;
     private readonly BONE_UBO_BINDING_POINT;
     constructor(gl: WebGL2RenderingContext);
@@ -43,10 +45,18 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     setGIGroundColor(color: [number, number, number]): void;
     setGIIntensity(intensity: number): void;
     setLambertWrap(wrap: number): void;
+    setSpecularEnabled(enabled: boolean): void;
+    setSpecularStrength(strength: number): void;
+    setSpecularShininess(shininess: number): void;
+    setViewPosition(position: [number, number, number]): void;
+    getSpecularEnabled(): boolean;
+    getSpecularStrength(): number;
+    getSpecularShininess(): number;
     setLightEnabled(index: number, enabled: boolean): void;
     private updateLightUniforms;
     private updateCameraPositionUniforms;
     private updateGIUniforms;
+    private updateSpecularUniforms;
     private updateAllLightUniforms;
     private updateLightEnableStates;
     private getLightTypeValue;
@@ -54,6 +64,7 @@ export declare class GPUResourceManager implements IGPUResourceManager {
     setLightDirection(index: number, direction: [number, number, number]): void;
     setLightColor(index: number, color: [number, number, number]): void;
     setLightIntensity(index: number, intensity: number): void;
+    setLightSpecularIntensity(index: number, specularIntensity: number): void;
     setSpotLightParams(index: number, angle: number, penumbra: number): void;
     setLightCastShadows(index: number, castShadows: boolean): void;
     private validateShadowCount;
