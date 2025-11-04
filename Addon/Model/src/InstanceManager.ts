@@ -893,6 +893,42 @@ export class InstanceManager implements IInstanceManager {
 
         return position;
     }
+
+    /**
+     * Gets a list of all bones/joints for a model with their indices and names.
+     * @param modelId The ID of the model
+     * @returns Object with bone information or null if model not found
+     */
+    public getModelBones(modelId: string): { bones: Array<{ index: number; name: string }> } | null {
+        const modelData = this.modelLoader.getModelData(modelId);
+        if (!modelData) {
+            console.warn(`[InstanceManager] Model data not found for ${modelId}`);
+            return null;
+        }
+
+        // Return the joint data as a simple array
+        const bones = modelData.jointData.map(joint => ({
+            index: joint.index,
+            name: joint.name || `bone_${joint.index}` // Provide fallback name for unnamed bones
+        }));
+
+        return { bones };
+    }
+
+    /**
+     * Gets a list of all bones/joints for a specific instance.
+     * @param instanceId The numeric ID of the model instance
+     * @returns Object with bone information or null if instance not found
+     */
+    public getInstanceBones(instanceId: number): { bones: Array<{ index: number; name: string }> } | null {
+        const instanceData = this.instances.get(instanceId);
+        if (!instanceData) {
+            console.warn(`[InstanceManager] Instance ${instanceId} not found`);
+            return null;
+        }
+
+        return this.getModelBones(instanceData.instanceId.modelId);
+    }
 }
 
 // @ts-ignore

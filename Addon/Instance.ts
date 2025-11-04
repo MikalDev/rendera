@@ -247,6 +247,36 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		// Delegate to instanceManager
 		return this.instanceManager.getBoneWorldPositionByIndex(instanceId, boneIndex);
 	}
+
+	/**
+	 * Gets a list of all bones/joints for a model with their indices and names.
+	 * @param modelId The ID of the model
+	 * @returns Object with bone information or null if model not found
+	 */
+	public getModelBones(modelId: string): { bones: Array<{ index: number; name: string }> } | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get model bones - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getModelBones(modelId);
+	}
+
+	/**
+	 * Gets a list of all bones/joints for a specific instance.
+	 * @param instanceId The numeric ID of the model instance
+	 * @returns Object with bone information or null if instance not found
+	 */
+	public getInstanceBones(instanceId: number): { bones: Array<{ index: number; name: string }> } | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get instance bones - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getInstanceBones(instanceId);
+	}
 };
 
 /** Important to save export type for Typescript compiler */

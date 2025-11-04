@@ -132,6 +132,18 @@ export interface IInstanceManager {
     setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void;
     getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null;
     getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
+    getModelBones(modelId: string): {
+        bones: Array<{
+            index: number;
+            name: string;
+        }>;
+    } | null;
+    getInstanceBones(instanceId: number): {
+        bones: Array<{
+            index: number;
+            name: string;
+        }>;
+    } | null;
     renderShadowMapInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {
         view: mat4;
         projection: mat4;

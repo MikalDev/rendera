@@ -213,6 +213,10 @@ export interface IInstanceManager {
     getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null;
     getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
 
+    // Bone list queries
+    getModelBones(modelId: string): { bones: Array<{ index: number; name: string }> } | null;
+    getInstanceBones(instanceId: number): { bones: Array<{ index: number; name: string }> } | null;
+
     // Rendering (internal use)
     renderShadowMapInstances(
         modelId: string,

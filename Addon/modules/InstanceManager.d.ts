@@ -91,5 +91,27 @@ export declare class InstanceManager implements IInstanceManager {
      * @returns [x, y, z] world position or null if bone/instance not found
      */
     getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
+    /**
+     * Gets a list of all bones/joints for a model with their indices and names.
+     * @param modelId The ID of the model
+     * @returns Object with bone information or null if model not found
+     */
+    getModelBones(modelId: string): {
+        bones: Array<{
+            index: number;
+            name: string;
+        }>;
+    } | null;
+    /**
+     * Gets a list of all bones/joints for a specific instance.
+     * @param instanceId The numeric ID of the model instance
+     * @returns Object with bone information or null if instance not found
+     */
+    getInstanceBones(instanceId: number): {
+        bones: Array<{
+            index: number;
+            name: string;
+        }>;
+    } | null;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map
