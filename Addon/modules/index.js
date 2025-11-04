@@ -19298,9 +19298,9 @@ class InstanceManager {
         return position;
     }
     /**
-     * Gets a list of all bones/joints for a model with their indices and names.
+     * Gets a list of all bones/joints for a model with their indices, names, and hierarchy.
      * @param modelId The ID of the model
-     * @returns Object with bone information or null if model not found
+     * @returns Object with bone information including hierarchy or null if model not found
      */
     getModelBones(modelId) {
         const modelData = this.modelLoader.getModelData(modelId);
@@ -19308,17 +19308,29 @@ class InstanceManager {
             console.warn(`[InstanceManager] Model data not found for ${modelId}`);
             return null;
         }
-        // Return the joint data as a simple array
-        const bones = modelData.jointData.map(joint => ({
-            index: joint.index,
-            name: joint.name || `bone_${joint.index}` // Provide fallback name for unnamed bones
-        }));
+        // Build a map of child index -> parent index for quick lookup
+        const parentMap = new Map();
+        modelData.jointData.forEach(joint => {
+            joint.children.forEach(childIndex => {
+                parentMap.set(childIndex, joint.index);
+            });
+        });
+        // Return the joint data with hierarchy information
+        const bones = modelData.jointData.map(joint => {
+            var _a;
+            return ({
+                index: joint.index,
+                name: joint.name || `bone_${joint.index}`, // Provide fallback name for unnamed bones
+                parentIndex: (_a = parentMap.get(joint.index)) !== null && _a !== void 0 ? _a : null, // null if root bone
+                children: joint.children // Array of child bone indices
+            });
+        });
         return { bones };
     }
     /**
-     * Gets a list of all bones/joints for a specific instance.
+     * Gets a list of all bones/joints for a specific instance with hierarchy information.
      * @param instanceId The numeric ID of the model instance
-     * @returns Object with bone information or null if instance not found
+     * @returns Object with bone information including hierarchy or null if instance not found
      */
     getInstanceBones(instanceId) {
         const instanceData = this.instances.get(instanceId);

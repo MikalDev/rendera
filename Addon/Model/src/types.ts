@@ -214,8 +214,8 @@ export interface IInstanceManager {
     getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
 
     // Bone list queries
-    getModelBones(modelId: string): { bones: Array<{ index: number; name: string }> } | null;
-    getInstanceBones(instanceId: number): { bones: Array<{ index: number; name: string }> } | null;
+    getModelBones(modelId: string): { bones: Array<{ index: number; name: string; parentIndex: number | null; children: number[] }> } | null;
+    getInstanceBones(instanceId: number): { bones: Array<{ index: number; name: string; parentIndex: number | null; children: number[] }> } | null;
 
     // Rendering (internal use)
     renderShadowMapInstances(

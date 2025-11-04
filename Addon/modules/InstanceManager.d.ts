@@ -92,25 +92,29 @@ export declare class InstanceManager implements IInstanceManager {
      */
     getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
     /**
-     * Gets a list of all bones/joints for a model with their indices and names.
+     * Gets a list of all bones/joints for a model with their indices, names, and hierarchy.
      * @param modelId The ID of the model
-     * @returns Object with bone information or null if model not found
+     * @returns Object with bone information including hierarchy or null if model not found
      */
     getModelBones(modelId: string): {
         bones: Array<{
             index: number;
             name: string;
+            parentIndex: number | null;
+            children: number[];
         }>;
     } | null;
     /**
-     * Gets a list of all bones/joints for a specific instance.
+     * Gets a list of all bones/joints for a specific instance with hierarchy information.
      * @param instanceId The numeric ID of the model instance
-     * @returns Object with bone information or null if instance not found
+     * @returns Object with bone information including hierarchy or null if instance not found
      */
     getInstanceBones(instanceId: number): {
         bones: Array<{
             index: number;
             name: string;
+            parentIndex: number | null;
+            children: number[];
         }>;
     } | null;
 }

@@ -136,12 +136,16 @@ export interface IInstanceManager {
         bones: Array<{
             index: number;
             name: string;
+            parentIndex: number | null;
+            children: number[];
         }>;
     } | null;
     getInstanceBones(instanceId: number): {
         bones: Array<{
             index: number;
             name: string;
+            parentIndex: number | null;
+            children: number[];
         }>;
     } | null;
     renderShadowMapInstances(modelId: string, instanceGroup: Set<number>, viewProjection: {

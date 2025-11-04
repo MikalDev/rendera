@@ -99,4 +99,16 @@ export default class ModelCategory {
     animationWorkerEnabled(this: Instance) {
         return this.getUseAnimationWorker() ? 1 : 0;
     }
+
+    @Expression('modelBones', 'Model bones', 'Get bone list with hierarchy for model {0}', {
+        params: [
+            addParam('modelPath', 'Model path', { type: Param.String })
+        ]
+    })
+    modelBones(this: Instance, modelPath: string) {
+        const modelId = this.modelLoader.generateModelId(modelPath);
+        const bones = this.getModelBones(modelId);
+        // Return JSON string for C3 to parse
+        return bones ? JSON.stringify(bones) : '';
+    }
 }

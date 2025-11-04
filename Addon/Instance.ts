@@ -249,11 +249,11 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	}
 
 	/**
-	 * Gets a list of all bones/joints for a model with their indices and names.
+	 * Gets a list of all bones/joints for a model with their indices, names, and hierarchy.
 	 * @param modelId The ID of the model
-	 * @returns Object with bone information or null if model not found
+	 * @returns Object with bone information including hierarchy or null if model not found
 	 */
-	public getModelBones(modelId: string): { bones: Array<{ index: number; name: string }> } | null {
+	public getModelBones(modelId: string): { bones: Array<{ index: number; name: string; parentIndex: number | null; children: number[] }> } | null {
 		if (!this.instanceManager) {
 			console.warn('[rendera] Cannot get model bones - instanceManager not initialized');
 			return null;
@@ -264,11 +264,11 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	}
 
 	/**
-	 * Gets a list of all bones/joints for a specific instance.
+	 * Gets a list of all bones/joints for a specific instance with hierarchy information.
 	 * @param instanceId The numeric ID of the model instance
-	 * @returns Object with bone information or null if instance not found
+	 * @returns Object with bone information including hierarchy or null if instance not found
 	 */
-	public getInstanceBones(instanceId: number): { bones: Array<{ index: number; name: string }> } | null {
+	public getInstanceBones(instanceId: number): { bones: Array<{ index: number; name: string; parentIndex: number | null; children: number[] }> } | null {
 		if (!this.instanceManager) {
 			console.warn('[rendera] Cannot get instance bones - instanceManager not initialized');
 			return null;
