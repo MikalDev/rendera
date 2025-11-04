@@ -19262,14 +19262,24 @@ class InstanceManager {
             console.log(`[InstanceManager] Instance position:`, Array.from(instanceData.transform.position));
             console.log(`[InstanceManager] Instance scale:`, Array.from(instanceData.transform.scale));
             if (modelData.jointData) {
+                const unitsScale = 100;
                 modelData.jointData.forEach((joint, idx) => {
                     const boneMatrix = instanceData.animationState.animationMatrices.get(joint.index);
                     if (boneMatrix) {
+                        // Unscaled
                         const boneWorldMatrix = create$3();
                         multiply(boneWorldMatrix, instanceData.worldMatrix, boneMatrix);
-                        const pos = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
+                        const posUnscaled = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
+                        // Scaled
+                        const scaledBoneMatrix = clone$3(boneMatrix);
+                        scaledBoneMatrix[12] *= unitsScale;
+                        scaledBoneMatrix[13] *= unitsScale;
+                        scaledBoneMatrix[14] *= unitsScale;
+                        const boneWorldMatrixScaled = create$3();
+                        multiply(boneWorldMatrixScaled, instanceData.worldMatrix, scaledBoneMatrix);
+                        const posScaled = [boneWorldMatrixScaled[12], boneWorldMatrixScaled[13], boneWorldMatrixScaled[14]];
                         const modelPos = [boneMatrix[12], boneMatrix[13], boneMatrix[14]];
-                        console.log(`[InstanceManager]   [${idx}] ${joint.name}: world=${pos.map(v => v.toFixed(3))} model=${modelPos.map(v => v.toFixed(3))}`);
+                        console.log(`[InstanceManager]   [${idx}] ${joint.name}: world=${posUnscaled.map(v => v.toFixed(1))} scaled=${posScaled.map(v => v.toFixed(1))} model=${modelPos.map(v => v.toFixed(1))}`);
                     }
                 });
             }
@@ -19287,9 +19297,16 @@ class InstanceManager {
             console.warn(`[InstanceManager] Animation matrix not found for bone "${boneName}"`);
             return null;
         }
+        // Apply units scale to bone position (temporary hardcoded to 100)
+        // The bone positions are in model-space units and need to match the mesh vertex scale
+        const unitsScale = 100;
+        const scaledBoneMatrix = clone$3(boneModelMatrix);
+        scaledBoneMatrix[12] *= unitsScale;
+        scaledBoneMatrix[13] *= unitsScale;
+        scaledBoneMatrix[14] *= unitsScale;
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = create$3();
-        multiply(boneWorldMatrix, instanceData.worldMatrix, boneModelMatrix);
+        multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
         // Extract translation component from world matrix
         const position = [
             boneWorldMatrix[12],
@@ -19316,9 +19333,16 @@ class InstanceManager {
             console.warn(`[InstanceManager] Animation matrix not found for bone index ${boneIndex}`);
             return null;
         }
+        // Apply units scale to bone position (temporary hardcoded to 100)
+        // The bone positions are in model-space units and need to match the mesh vertex scale
+        const unitsScale = 100;
+        const scaledBoneMatrix = clone$3(boneModelMatrix);
+        scaledBoneMatrix[12] *= unitsScale;
+        scaledBoneMatrix[13] *= unitsScale;
+        scaledBoneMatrix[14] *= unitsScale;
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = create$3();
-        multiply(boneWorldMatrix, instanceData.worldMatrix, boneModelMatrix);
+        multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
         // Extract translation component
         const position = [
             boneWorldMatrix[12],

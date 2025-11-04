@@ -852,14 +852,26 @@ export class InstanceManager implements IInstanceManager {
             console.log(`[InstanceManager] Instance scale:`, Array.from(instanceData.transform.scale));
 
             if (modelData.jointData) {
+                const unitsScale = 100;
                 modelData.jointData.forEach((joint, idx) => {
                     const boneMatrix = instanceData.animationState.animationMatrices.get(joint.index);
                     if (boneMatrix) {
+                        // Unscaled
                         const boneWorldMatrix = mat4.create();
                         mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneMatrix);
-                        const pos = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
+                        const posUnscaled = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
+
+                        // Scaled
+                        const scaledBoneMatrix = mat4.clone(boneMatrix);
+                        scaledBoneMatrix[12] *= unitsScale;
+                        scaledBoneMatrix[13] *= unitsScale;
+                        scaledBoneMatrix[14] *= unitsScale;
+                        const boneWorldMatrixScaled = mat4.create();
+                        mat4.multiply(boneWorldMatrixScaled, instanceData.worldMatrix, scaledBoneMatrix);
+                        const posScaled = [boneWorldMatrixScaled[12], boneWorldMatrixScaled[13], boneWorldMatrixScaled[14]];
+
                         const modelPos = [boneMatrix[12], boneMatrix[13], boneMatrix[14]];
-                        console.log(`[InstanceManager]   [${idx}] ${joint.name}: world=${pos.map(v => v.toFixed(3))} model=${modelPos.map(v => v.toFixed(3))}`);
+                        console.log(`[InstanceManager]   [${idx}] ${joint.name}: world=${posUnscaled.map(v => v.toFixed(1))} scaled=${posScaled.map(v => v.toFixed(1))} model=${modelPos.map(v => v.toFixed(1))}`);
                     }
                 });
             }
@@ -880,9 +892,17 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
+        // Apply units scale to bone position (temporary hardcoded to 100)
+        // The bone positions are in model-space units and need to match the mesh vertex scale
+        const unitsScale = 100;
+        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
+        scaledBoneMatrix[12] *= unitsScale;
+        scaledBoneMatrix[13] *= unitsScale;
+        scaledBoneMatrix[14] *= unitsScale;
+
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();
-        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneModelMatrix);
+        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
 
         // Extract translation component from world matrix
         const position: [number, number, number] = [
@@ -914,9 +934,17 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
+        // Apply units scale to bone position (temporary hardcoded to 100)
+        // The bone positions are in model-space units and need to match the mesh vertex scale
+        const unitsScale = 100;
+        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
+        scaledBoneMatrix[12] *= unitsScale;
+        scaledBoneMatrix[13] *= unitsScale;
+        scaledBoneMatrix[14] *= unitsScale;
+
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();
-        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneModelMatrix);
+        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
 
         // Extract translation component
         const position: [number, number, number] = [
