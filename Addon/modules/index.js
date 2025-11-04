@@ -18609,6 +18609,9 @@ class InstanceManager {
         this.dirtyInstances = new Set();
         this.lastRenderTick = -1;
         this.cachedModelsInWorker = new Set();
+        // Debug tracking for bone position logging
+        this.lastBoneLogTick = -1;
+        this.loggedInstancesThisTick = new Set();
         this.frustum = new Frustum();
         this.gl = gl;
         this.modelLoader = modelLoader;
@@ -19245,6 +19248,33 @@ class InstanceManager {
             console.warn(`[InstanceManager] Model data not found for instance ${instanceId}`);
             return null;
         }
+        // Debug: Log all bone positions once per tick for this instance
+        const currentTick = Date.now();
+        if (currentTick !== this.lastBoneLogTick) {
+            // New tick, clear logged instances
+            this.lastBoneLogTick = currentTick;
+            this.loggedInstancesThisTick.clear();
+        }
+        if (!this.loggedInstancesThisTick.has(instanceId)) {
+            // First bone request for this instance this tick - log all bones
+            this.loggedInstancesThisTick.add(instanceId);
+            console.log(`[InstanceManager] === All bone positions for instance ${instanceId} ===`);
+            console.log(`[InstanceManager] Instance position:`, Array.from(instanceData.transform.position));
+            console.log(`[InstanceManager] Instance scale:`, Array.from(instanceData.transform.scale));
+            if (modelData.jointData) {
+                modelData.jointData.forEach((joint, idx) => {
+                    const boneMatrix = instanceData.animationState.animationMatrices.get(joint.index);
+                    if (boneMatrix) {
+                        const boneWorldMatrix = create$3();
+                        multiply(boneWorldMatrix, instanceData.worldMatrix, boneMatrix);
+                        const pos = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
+                        const modelPos = [boneMatrix[12], boneMatrix[13], boneMatrix[14]];
+                        console.log(`[InstanceManager]   [${idx}] ${joint.name}: world=${pos.map(v => v.toFixed(3))} model=${modelPos.map(v => v.toFixed(3))}`);
+                    }
+                });
+            }
+            console.log(`[InstanceManager] ====================================`);
+        }
         // Find the node by name
         const boneNode = (_a = modelData.nodeNameMap) === null || _a === void 0 ? void 0 : _a.get(boneName);
         if (!boneNode) {
@@ -19260,7 +19290,7 @@ class InstanceManager {
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = create$3();
         multiply(boneWorldMatrix, instanceData.worldMatrix, boneModelMatrix);
-        // Extract translation component
+        // Extract translation component from world matrix
         const position = [
             boneWorldMatrix[12],
             boneWorldMatrix[13],

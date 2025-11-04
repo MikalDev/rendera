@@ -20,6 +20,8 @@ export declare class InstanceManager implements IInstanceManager {
     private dirtyInstances;
     private lastRenderTick;
     private cachedModelsInWorker;
+    private lastBoneLogTick;
+    private loggedInstancesThisTick;
     private _animationController;
     private frustum;
     constructor(gl: WebGL2RenderingContext, modelLoader: ModelLoader, gpuResources: IGPUResourceManager);
