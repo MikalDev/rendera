@@ -857,6 +857,12 @@ export class InstanceManager implements IInstanceManager {
             boneWorldMatrix[14]
         ];
 
+        // Debug logging
+        console.log(`[InstanceManager] Bone "${boneName}" position:`, position);
+        console.log(`[InstanceManager] Instance position:`, instanceData.transform.position);
+        console.log(`[InstanceManager] Instance scale:`, instanceData.transform.scale);
+        console.log(`[InstanceManager] Bone model matrix translation:`, [boneModelMatrix[12], boneModelMatrix[13], boneModelMatrix[14]]);
+
         return position;
     }
 
