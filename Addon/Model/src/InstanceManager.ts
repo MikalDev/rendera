@@ -852,7 +852,8 @@ export class InstanceManager implements IInstanceManager {
             console.log(`[InstanceManager] Instance scale:`, Array.from(instanceData.transform.scale));
 
             if (modelData.jointData) {
-                const unitsScale = 100;
+                const boneScale = modelData.boneScale ?? 1.0;
+                console.log(`[InstanceManager] Detected bone scale: ${boneScale.toFixed(2)}`);
                 modelData.jointData.forEach((joint, idx) => {
                     const boneMatrix = instanceData.animationState.animationMatrices.get(joint.index);
                     if (boneMatrix) {
@@ -861,10 +862,11 @@ export class InstanceManager implements IInstanceManager {
                         mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneMatrix);
                         const posUnscaled = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
 
-                        // Scaled (using proper matrix scaling)
-                        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
-                        const scaledBoneMatrix = mat4.create();
-                        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneMatrix);
+                        // Scaled using component-wise translation scaling
+                        const scaledBoneMatrix = mat4.clone(boneMatrix);
+                        scaledBoneMatrix[12] *= boneScale;
+                        scaledBoneMatrix[13] *= boneScale;
+                        scaledBoneMatrix[14] *= boneScale;
                         const boneWorldMatrixScaled = mat4.create();
                         mat4.multiply(boneWorldMatrixScaled, instanceData.worldMatrix, scaledBoneMatrix);
                         const posScaled = [boneWorldMatrixScaled[12], boneWorldMatrixScaled[13], boneWorldMatrixScaled[14]];
@@ -891,12 +893,14 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
-        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
-        // This scales both the base position AND animation deltas correctly
-        const unitsScale = 100;
-        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
-        const scaledBoneMatrix = mat4.create();
-        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
+        // Use bone scale detected from inverse bind matrices (defaults to 1.0 for non-skinned models)
+        const boneScale = modelData.boneScale ?? 1.0;
+
+        // Scale bone translation components to match skinned mesh vertex scale
+        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
+        scaledBoneMatrix[12] *= boneScale;
+        scaledBoneMatrix[13] *= boneScale;
+        scaledBoneMatrix[14] *= boneScale;
 
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();
@@ -932,12 +936,20 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
-        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
-        // This scales both the base position AND animation deltas correctly
-        const unitsScale = 100;
-        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
-        const scaledBoneMatrix = mat4.create();
-        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
+        const modelData = this.modelLoader.getModelData(instanceData.instanceId.modelId);
+        if (!modelData) {
+            console.warn(`[InstanceManager] Model data not found for instance ${instanceId}`);
+            return null;
+        }
+
+        // Use bone scale detected from inverse bind matrices (defaults to 1.0 for non-skinned models)
+        const boneScale = modelData.boneScale ?? 1.0;
+
+        // Scale bone translation components to match skinned mesh vertex scale
+        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
+        scaledBoneMatrix[12] *= boneScale;
+        scaledBoneMatrix[13] *= boneScale;
+        scaledBoneMatrix[14] *= boneScale;
 
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();
@@ -987,12 +999,14 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
-        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
-        // This scales both the base position AND animation deltas correctly
-        const unitsScale = 100;
-        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
-        const scaledBoneMatrix = mat4.create();
-        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
+        // Use bone scale detected from inverse bind matrices (defaults to 1.0 for non-skinned models)
+        const boneScale = modelData.boneScale ?? 1.0;
+
+        // Scale bone translation components to match skinned mesh vertex scale
+        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
+        scaledBoneMatrix[12] *= boneScale;
+        scaledBoneMatrix[13] *= boneScale;
+        scaledBoneMatrix[14] *= boneScale;
 
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();
@@ -1022,12 +1036,20 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
-        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
-        // This scales both the base position AND animation deltas correctly
-        const unitsScale = 100;
-        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
-        const scaledBoneMatrix = mat4.create();
-        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
+        const modelData = this.modelLoader.getModelData(instanceData.instanceId.modelId);
+        if (!modelData) {
+            console.warn(`[InstanceManager] Model data not found for instance ${instanceId}`);
+            return null;
+        }
+
+        // Use bone scale detected from inverse bind matrices (defaults to 1.0 for non-skinned models)
+        const boneScale = modelData.boneScale ?? 1.0;
+
+        // Scale bone translation components to match skinned mesh vertex scale
+        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
+        scaledBoneMatrix[12] *= boneScale;
+        scaledBoneMatrix[13] *= boneScale;
+        scaledBoneMatrix[14] *= boneScale;
 
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();

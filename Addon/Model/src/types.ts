@@ -269,6 +269,7 @@ export interface ModelData {
     nodeArray?: Node[];
     nodeNameMap: Map<string, ExtendedNode>;
     boundingSphere?: BoundingSphere;
+    boneScale?: number; // Scale factor detected from inverse bind matrices
 }
 
 export interface JointData {

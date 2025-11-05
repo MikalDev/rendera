@@ -402,7 +402,11 @@ export class ModelLoader implements IModelLoader {
 
     private processJoints(document: Document, modelData: ModelData) {
         const skins = document.getRoot().listSkins();
-        if (skins.length === 0) return;
+        if (skins.length === 0) {
+            // No skinning - bones (if any) are in the same space as mesh vertices
+            modelData.boneScale = 1.0;
+            return;
+        }
 
         const skin = skins[0];
         const joints = skin.listJoints();
@@ -444,6 +448,14 @@ export class ModelLoader implements IModelLoader {
             // Apply coordinate conversion to inverse bind matrix
             const inverseBindMatrix = mat4.create();
             mat4.multiply(inverseBindMatrix, originalInverseBindMatrix, COORDINATE_CONVERSION_MATRIX);
+
+            // Detect bone scale from first inverse bind matrix
+            if (index === 0) {
+                const scale = mat4.getScaling([0, 0, 0], inverseBindMatrix);
+                const avgScale = (Math.abs(scale[0]) + Math.abs(scale[1]) + Math.abs(scale[2])) / 3;
+                modelData.boneScale = avgScale;
+                console.log(`[ModelLoader] Detected bone scale from inverse bind matrices: ${avgScale.toFixed(2)}`);
+            }
 
             // Get child indices, validating each one
             const children = joint.listChildren()
