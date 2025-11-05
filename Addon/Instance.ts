@@ -277,6 +277,104 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 		// Delegate to instanceManager
 		return this.instanceManager.getInstanceBones(instanceId);
 	}
+
+	/**
+	 * Gets the complete world transformation matrix of a bone/joint by name.
+	 * This includes position, rotation, and scale - useful for attaching objects to bones.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneName The name of the bone/joint
+	 * @returns 4x4 transformation matrix (Float32Array) or null if bone/instance not found
+	 */
+	public getBoneWorldTransform(instanceId: number, boneName: string): Float32Array | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone transform - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldTransform(instanceId, boneName);
+	}
+
+	/**
+	 * Gets the complete world transformation matrix of a bone/joint by index.
+	 * This includes position, rotation, and scale - useful for attaching objects to bones.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneIndex The index of the bone/joint
+	 * @returns 4x4 transformation matrix (Float32Array) or null if bone/instance not found
+	 */
+	public getBoneWorldTransformByIndex(instanceId: number, boneIndex: number): Float32Array | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone transform - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldTransformByIndex(instanceId, boneIndex);
+	}
+
+	/**
+	 * Gets the world rotation of a bone/joint by name as a quaternion.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneName The name of the bone/joint
+	 * @returns [x, y, z, w] quaternion or null if bone/instance not found
+	 */
+	public getBoneWorldRotation(instanceId: number, boneName: string): [number, number, number, number] | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone rotation - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldRotation(instanceId, boneName);
+	}
+
+	/**
+	 * Gets the world rotation of a bone/joint by index as a quaternion.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneIndex The index of the bone/joint
+	 * @returns [x, y, z, w] quaternion or null if bone/instance not found
+	 */
+	public getBoneWorldRotationByIndex(instanceId: number, boneIndex: number): [number, number, number, number] | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone rotation - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldRotationByIndex(instanceId, boneIndex);
+	}
+
+	/**
+	 * Gets the world scale of a bone/joint by name.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneName The name of the bone/joint
+	 * @returns [x, y, z] scale or null if bone/instance not found
+	 */
+	public getBoneWorldScale(instanceId: number, boneName: string): [number, number, number] | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone scale - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldScale(instanceId, boneName);
+	}
+
+	/**
+	 * Gets the world scale of a bone/joint by index.
+	 * @param instanceId The numeric ID of the model instance
+	 * @param boneIndex The index of the bone/joint
+	 * @returns [x, y, z] scale or null if bone/instance not found
+	 */
+	public getBoneWorldScaleByIndex(instanceId: number, boneIndex: number): [number, number, number] | null {
+		if (!this.instanceManager) {
+			console.warn('[rendera] Cannot get bone scale - instanceManager not initialized');
+			return null;
+		}
+
+		// Delegate to instanceManager
+		return this.instanceManager.getBoneWorldScaleByIndex(instanceId, boneIndex);
+	}
 };
 
 /** Important to save export type for Typescript compiler */

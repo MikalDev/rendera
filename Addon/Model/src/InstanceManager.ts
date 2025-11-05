@@ -861,11 +861,10 @@ export class InstanceManager implements IInstanceManager {
                         mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneMatrix);
                         const posUnscaled = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
 
-                        // Scaled
-                        const scaledBoneMatrix = mat4.clone(boneMatrix);
-                        scaledBoneMatrix[12] *= unitsScale;
-                        scaledBoneMatrix[13] *= unitsScale;
-                        scaledBoneMatrix[14] *= unitsScale;
+                        // Scaled (using proper matrix scaling)
+                        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
+                        const scaledBoneMatrix = mat4.create();
+                        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneMatrix);
                         const boneWorldMatrixScaled = mat4.create();
                         mat4.multiply(boneWorldMatrixScaled, instanceData.worldMatrix, scaledBoneMatrix);
                         const posScaled = [boneWorldMatrixScaled[12], boneWorldMatrixScaled[13], boneWorldMatrixScaled[14]];
@@ -892,13 +891,12 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
-        // Apply units scale to bone position (temporary hardcoded to 100)
-        // The bone positions are in model-space units and need to match the mesh vertex scale
+        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
+        // This scales both the base position AND animation deltas correctly
         const unitsScale = 100;
-        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
-        scaledBoneMatrix[12] *= unitsScale;
-        scaledBoneMatrix[13] *= unitsScale;
-        scaledBoneMatrix[14] *= unitsScale;
+        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
+        const scaledBoneMatrix = mat4.create();
+        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
 
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();
@@ -934,13 +932,12 @@ export class InstanceManager implements IInstanceManager {
             return null;
         }
 
-        // Apply units scale to bone position (temporary hardcoded to 100)
-        // The bone positions are in model-space units and need to match the mesh vertex scale
+        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
+        // This scales both the base position AND animation deltas correctly
         const unitsScale = 100;
-        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
-        scaledBoneMatrix[12] *= unitsScale;
-        scaledBoneMatrix[13] *= unitsScale;
-        scaledBoneMatrix[14] *= unitsScale;
+        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
+        const scaledBoneMatrix = mat4.create();
+        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
 
         // Transform to world space using instance's world matrix
         const boneWorldMatrix = mat4.create();
@@ -954,6 +951,157 @@ export class InstanceManager implements IInstanceManager {
         ];
 
         return position;
+    }
+
+    /**
+     * Gets the complete world transformation matrix of a bone/joint by name.
+     * This includes position, rotation, and scale - useful for attaching objects to bones.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneName The name of the bone/joint
+     * @returns 4x4 transformation matrix (Float32Array) or null if bone/instance not found
+     */
+    public getBoneWorldTransform(instanceId: number, boneName: string): mat4 | null {
+        const instanceData = this.instances.get(instanceId);
+        if (!instanceData) {
+            console.warn(`[InstanceManager] Instance ${instanceId} not found`);
+            return null;
+        }
+
+        const modelData = this.modelLoader.getModelData(instanceData.instanceId.modelId);
+        if (!modelData) {
+            console.warn(`[InstanceManager] Model data not found for instance ${instanceId}`);
+            return null;
+        }
+
+        // Find the node by name
+        const boneNode = modelData.nodeNameMap?.get(boneName);
+        if (!boneNode) {
+            console.warn(`[InstanceManager] Bone "${boneName}" not found in model`);
+            return null;
+        }
+
+        // Get the bone's model-space transform from animation matrices
+        const boneModelMatrix = instanceData.animationState.animationMatrices.get(boneNode.indexData.nodeIndex);
+        if (!boneModelMatrix) {
+            console.warn(`[InstanceManager] Animation matrix not found for bone "${boneName}"`);
+            return null;
+        }
+
+        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
+        // This scales both the base position AND animation deltas correctly
+        const unitsScale = 100;
+        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
+        const scaledBoneMatrix = mat4.create();
+        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
+
+        // Transform to world space using instance's world matrix
+        const boneWorldMatrix = mat4.create();
+        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
+
+        return boneWorldMatrix;
+    }
+
+    /**
+     * Gets the complete world transformation matrix of a bone/joint by index.
+     * This includes position, rotation, and scale - useful for attaching objects to bones.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneIndex The index of the bone/joint
+     * @returns 4x4 transformation matrix (Float32Array) or null if bone/instance not found
+     */
+    public getBoneWorldTransformByIndex(instanceId: number, boneIndex: number): mat4 | null {
+        const instanceData = this.instances.get(instanceId);
+        if (!instanceData) {
+            console.warn(`[InstanceManager] Instance ${instanceId} not found`);
+            return null;
+        }
+
+        // Get the bone's model-space transform from animation matrices
+        const boneModelMatrix = instanceData.animationState.animationMatrices.get(boneIndex);
+        if (!boneModelMatrix) {
+            console.warn(`[InstanceManager] Animation matrix not found for bone index ${boneIndex}`);
+            return null;
+        }
+
+        // Apply units scale to the entire bone transform (temporary hardcoded to 100)
+        // This scales both the base position AND animation deltas correctly
+        const unitsScale = 100;
+        const scaleMatrix = mat4.fromScaling(mat4.create(), [unitsScale, unitsScale, unitsScale]);
+        const scaledBoneMatrix = mat4.create();
+        mat4.multiply(scaledBoneMatrix, scaleMatrix, boneModelMatrix);
+
+        // Transform to world space using instance's world matrix
+        const boneWorldMatrix = mat4.create();
+        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
+
+        return boneWorldMatrix;
+    }
+
+    /**
+     * Gets the world rotation of a bone/joint by name as a quaternion.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneName The name of the bone/joint
+     * @returns [x, y, z, w] quaternion or null if bone/instance not found
+     */
+    public getBoneWorldRotation(instanceId: number, boneName: string): [number, number, number, number] | null {
+        const transform = this.getBoneWorldTransform(instanceId, boneName);
+        if (!transform) {
+            return null;
+        }
+
+        // Extract rotation quaternion from the transform matrix
+        const rotation = mat4.getRotation([0, 0, 0, 0], transform);
+        return [rotation[0], rotation[1], rotation[2], rotation[3]];
+    }
+
+    /**
+     * Gets the world rotation of a bone/joint by index as a quaternion.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneIndex The index of the bone/joint
+     * @returns [x, y, z, w] quaternion or null if bone/instance not found
+     */
+    public getBoneWorldRotationByIndex(instanceId: number, boneIndex: number): [number, number, number, number] | null {
+        const transform = this.getBoneWorldTransformByIndex(instanceId, boneIndex);
+        if (!transform) {
+            return null;
+        }
+
+        // Extract rotation quaternion from the transform matrix
+        const rotation = mat4.getRotation([0, 0, 0, 0], transform);
+        return [rotation[0], rotation[1], rotation[2], rotation[3]];
+    }
+
+    /**
+     * Gets the world scale of a bone/joint by name.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneName The name of the bone/joint
+     * @returns [x, y, z] scale or null if bone/instance not found
+     */
+    public getBoneWorldScale(instanceId: number, boneName: string): [number, number, number] | null {
+        const transform = this.getBoneWorldTransform(instanceId, boneName);
+        if (!transform) {
+            return null;
+        }
+
+        // Extract scale from the transform matrix
+        const scale = mat4.getScaling([0, 0, 0], transform);
+        return [scale[0], scale[1], scale[2]];
+    }
+
+    /**
+     * Gets the world scale of a bone/joint by index.
+     * @param instanceId The numeric ID of the model instance
+     * @param boneIndex The index of the bone/joint
+     * @returns [x, y, z] scale or null if bone/instance not found
+     */
+    public getBoneWorldScaleByIndex(instanceId: number, boneIndex: number): [number, number, number] | null {
+        const transform = this.getBoneWorldTransformByIndex(instanceId, boneIndex);
+        if (!transform) {
+            return null;
+        }
+
+        // Extract scale from the transform matrix
+        const scale = mat4.getScaling([0, 0, 0], transform);
+        return [scale[0], scale[1], scale[2]];
     }
 
     /**
