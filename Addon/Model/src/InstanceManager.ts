@@ -1,5 +1,4 @@
-import { ModelError, ModelErrorCode } from './errors';
-import { InstanceData, IInstanceManager, IGPUResourceManager, InstanceId, type AnimationOptions, MAX_BONES, NodeTransforms, AnimationEventCallback } from './types';
+import { InstanceData, IInstanceManager, IGPUResourceManager, InstanceId, type AnimationOptions, NodeTransforms, AnimationEventCallback } from './types';
 import { ModelLoader } from './ModelLoader';
 import { Model } from './Model';
 import { AnimationController } from './AnimationController';
@@ -32,11 +31,6 @@ export class InstanceManager implements IInstanceManager {
     private dirtyInstances: Set<number> = new Set();
     private lastRenderTick = -1;
     private cachedModelsInWorker: Set<string> = new Set();
-
-    // Debug tracking for bone position logging
-    private lastBoneLogTick = -1;
-    private loggedInstancesThisTick: Set<number> = new Set();
-
     private _animationController: AnimationController;
     private frustum: Frustum = new Frustum();
 
@@ -58,48 +52,28 @@ export class InstanceManager implements IInstanceManager {
     }
 
     initialize(): void {
-        // Log WebGL context attributes
-        const contextAttributes = this.gl.getContextAttributes();
-        console.log('WebGL Context Attributes:', contextAttributes);
-
-        // Basic WebGL2 initialization
         this.gl.clearColor(0.1, 0.1, 0.1, 1.0);
         this.gl.enable(this.gl.DEPTH_TEST);
         this.gl.enable(this.gl.CULL_FACE);
         this.gl.cullFace(this.gl.BACK);
-        
-        // Enable blending for transparency
         this.gl.enable(this.gl.BLEND);
         this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
-
-        // Set viewport
         this.gl.viewport(0, 0, this.gl.canvas.width, this.gl.canvas.height);
 
-        // Clear any existing buffers/state
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
         this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
         this.gl.bindVertexArray(null);
         this.gl.useProgram(null);
 
-        // Clear instance tracking
         this.dirtyInstances.clear();
         this.instanceBuffers.clear();
-
-        // Clear canvas
         this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
 
-        // Enable additional WebGL features
-        this.gl.enable(this.gl.SCISSOR_TEST);  // For viewport clipping
-        
-        // Set pixel store parameters
-        this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);  // Flip textures right-side up
+        this.gl.enable(this.gl.SCISSOR_TEST);
+        this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
         this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 4);  // Standard pixel alignment
-        
-        // Set default texture parameters
+        this.gl.pixelStorei(this.gl.UNPACK_ALIGNMENT, 4);
         this.gl.activeTexture(this.gl.TEXTURE0);
-        
-        // Set default line width
         this.gl.lineWidth(1.0);
     }
 
@@ -197,32 +171,20 @@ export class InstanceManager implements IInstanceManager {
         const instance = this.instances.get(instanceId);
         if (!instance) return;
 
-        // Update animation if active
-        if (instance.animationState.currentAnimation !== null ) {
+        if (instance.animationState.currentAnimation !== null) {
             this.updateAnimation(instance, deltaTime);
         }
 
-        // Update world matrix if transform is dirty
         if (this.dirtyInstances.has(instanceId)) {
             this.updateWorldMatrix(instance);
         }
     }
 
     render(viewProjection: { view: mat4, projection: mat4 }, tick?: number, nearPlaneOffset: number = 0.0): void {
-        // Skip rendering if already rendered this tick
-        if (tick !== undefined && tick === this.lastRenderTick) {
-            return;
-        }
-        if (tick !== undefined) {
-            this.lastRenderTick = tick;
-        }
+        if (tick !== undefined && tick === this.lastRenderTick) return;
+        if (tick !== undefined) this.lastRenderTick = tick;
+        if (this.instances.size === 0) return;
 
-        // Early exit if there are no instances to render
-        if (this.instances.size === 0) {
-            return;
-        }
-
-        // Render each model group
         // @ts-ignore
         let renderer: WebGLRenderer;
         // @ts-ignore
@@ -233,35 +195,28 @@ export class InstanceManager implements IInstanceManager {
         }
 
         this.gpuResources.gpuResourceCache.cacheModelMode();
+
         if (this.shadowMapManager) {
             this.shadowMapManager.updateAllShadowMaps(this.gpuResources.lights);
-            // Pass lights array for optimized early exit when no shadows are cast
             const shadowsWereRendered = this.shadowMapManager.renderAllShadowMaps(this, this.gpuResources.lights);
 
-            // Restore GL state after shadow rendering
-            // Trust the cached state - if C3 resized, syncWithGLState() will fix it next frame
             if (shadowsWereRendered) {
                 const cachedState = this.gpuResources.gpuResourceCache.getCachedModelState();
                 if (cachedState) {
                     const tracker = (this.gpuResources as any).getWebGLStateTracker?.();
                     if (tracker) {
                         const original = tracker.getOriginalMethods();
-
-                        // Restore framebuffer
                         original.bindFramebuffer(this.gl.FRAMEBUFFER, cachedState.boundFramebuffer || null);
-
-                        // Restore viewport
                         original.viewport(...cachedState.viewport);
-                        // Restore color mask (shadow rendering disables it)
                         original.colorMask(...cachedState.colorMask);
-                        // Restore depth test state
+
                         if (cachedState.capabilities.get(this.gl.DEPTH_TEST)) {
                             original.enable(this.gl.DEPTH_TEST);
                         } else {
                             original.disable(this.gl.DEPTH_TEST);
                         }
                         original.depthFunc(cachedState.depthFunc);
-                        // Restore scissor test state
+
                         if (cachedState.capabilities.get(this.gl.SCISSOR_TEST)) {
                             original.enable(this.gl.SCISSOR_TEST);
                         } else {
@@ -271,16 +226,6 @@ export class InstanceManager implements IInstanceManager {
                     }
                 }
             }
-        }
-
-        // Set multiple shadow map uniforms using new multi-shadow system
-        if (this.shadowMapManager) {
-            // Debug: Log shadow setup once per frame (if debug enabled)
-            const DEBUG_SHADOWS = false; // Set to true to enable debug logging
-            if (DEBUG_SHADOWS) {
-                const activeShadowMaps = this.shadowMapManager.getActiveShadowMapIndices();
-                console.log(`[InstanceManager] Frame render - Active shadow maps: [${activeShadowMaps.join(', ')}]`);
-            }
 
             this.gpuResources.setMultipleShadowMapUniforms(
                 this.defaultShaderProgram,
@@ -288,11 +233,7 @@ export class InstanceManager implements IInstanceManager {
             );
         }
 
-        // Update frustum from view-projection matrices
         this.frustum.extractFromMatrix(viewProjection.view, viewProjection.projection);
-
-        // Ensure color mask is enabled before rendering 3D models
-        // Shadow rendering disables it, and we need it enabled for visible output
         this.gl.colorMask(true, true, true, true);
 
         for (const [modelId, instanceGroup] of this.instancesByModel) {
@@ -303,14 +244,11 @@ export class InstanceManager implements IInstanceManager {
         if (runtime) renderer.SetTexture(null);
     }
 
-    // Helper method for Model class to mark instance as dirty
     public markInstanceDirty(instanceId: number): void {
         this.dirtyInstances.add(instanceId);
     }
 
-    // Helper method for Model class to invalidate animation cache
     public invalidateAnimationCache(instanceId: number): void {
-        // Delegate to animation controller which manages the cache
         this._animationController.invalidateCache(instanceId);
     }
 
@@ -321,19 +259,11 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    // Removed - Model handles this directly
-
     public updateModelAnimation(instance: Model, deltaTime: number): void {
         const instanceData = this.instances.get(instance.instanceId.id);
         if (instanceData) {
             this.updateAnimation(instanceData, deltaTime);
         }
-    }
-
-    // Removed - Model handles these directly
-
-    private createError(code: ModelErrorCode, message: string): ModelError {
-        return { name: 'ModelError', code, message };
     }
 
     private addToModelGroup(instanceId: InstanceId): void {
@@ -369,13 +299,9 @@ export class InstanceManager implements IInstanceManager {
        instance.worldMatrix.set(srtMatrix);
     }
 
-    // DRY: Extract bounding sphere culling logic
     private isInstanceVisible(instance: InstanceData, modelData: any, nearPlaneOffset: number = 0.0): boolean {
-        if (!modelData.boundingSphere) {
-            return true; // No bounding sphere = always visible
-        }
+        if (!modelData.boundingSphere) return true;
 
-        // KISS: Simple approximation - transform center and apply max scale
         const center = modelData.boundingSphere.center;
         const worldCenter: [number, number, number] = [
             instance.transform.position[0] + center[0] * instance.transform.scale[0],
@@ -387,10 +313,8 @@ export class InstanceManager implements IInstanceManager {
             center: worldCenter,
             radius: modelData.boundingSphere.radius * Math.max(...instance.transform.scale)
         };
-        const isVisible = this.frustum.testSphere(worldBoundingSphere, nearPlaneOffset);
-        
 
-        return isVisible;
+        return this.frustum.testSphere(worldBoundingSphere, nearPlaneOffset);
     }
 
     public renderModelInstances(
@@ -402,62 +326,35 @@ export class InstanceManager implements IInstanceManager {
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData) return;
 
-        // Shader is already bound by setMultipleShadowMapUniforms in the render() function
-        // No need to bind it again here
-
-        // For each instance
         for (const instanceId of instanceGroup) {
             const instance = this.instances.get(instanceId);
             if (!instance) continue;
 
-            // KISS Frustum culling: Test instance bounding sphere
-            if (!this.isInstanceVisible(instance, modelData, nearPlaneOffset)) {
-                continue;
-            }
+            if (!this.isInstanceVisible(instance, modelData, nearPlaneOffset)) continue;
 
-            // Update world matrix for rendering
             this.updateWorldMatrix(instance);
 
-            const renderOptions = instance.renderOptions;
-
-            // Set normal map state for this instance
             this.gpuResources.setNormalMapEnabled(
-                this.defaultShaderProgram, 
-                renderOptions.useNormalMap ?? false
+                this.defaultShaderProgram,
+                instance.renderOptions.useNormalMap ?? false
             );
 
-            // For each mesh in the model
             for (const renderableNode of modelData.renderableNodes) {
-                // Check if this node is disabled for this instance
-                if (instance.allNodesDisabled) {
-                    continue; // Skip all nodes
-                }
-                
+                if (instance.allNodesDisabled) continue;
+
                 const nodeName = renderableNode.nodeName;
                 const nodeIdentifier = nodeName || `node_${renderableNode.node.indexData.nodeIndex}`;
-                
-                if (instance.disabledNodes.has(nodeIdentifier)) {
-                    continue; // Skip rendering this node
-                }
-                
+
+                if (instance.disabledNodes.has(nodeIdentifier)) continue;
+
                 const mesh = renderableNode.modelMesh;
                 for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex++) {
                     const primitive = mesh.primitives[primitiveIndex];
-
-                    // Check for material override for this instance
                     const primitiveKey = `${renderableNode.node.indexData.nodeIndex}_${primitiveIndex}`;
                     const materialIndex = instance.materialOverrides.get(primitiveKey) ?? primitive.material;
-
-                    // const material = modelData.materials[materialIndex];
-                    // const shader = material.program;
-                    // TODO: move to GPUResourceManager
                     const shader = this.defaultShaderProgram;
 
-                    // Shader is already bound - no need to bind again
-                    // 1. Bind VAO (contains vertex attributes setup)
                     this.gl.bindVertexArray(primitive.vao);
-
-                    // 2. Set required uniforms using cached locations
                     const viewLoc = this.uniformCache.getLocation(shader, 'u_View');
                     const projectionLoc = this.uniformCache.getLocation(shader, 'u_Projection');
                     const modelLoc = this.uniformCache.getLocation(shader, 'u_Model');
@@ -467,22 +364,17 @@ export class InstanceManager implements IInstanceManager {
                     this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
                     this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
                     this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
-                    
-                    // Set tint and opacity uniforms
+
                     const tintLoc = this.uniformCache.getLocation(shader, 'u_TintColor');
                     const opacityLoc = this.uniformCache.getLocation(shader, 'u_Opacity');
                     if (tintLoc !== -1) this.gl.uniform3fv(tintLoc, instance.tintColor);
                     if (opacityLoc !== -1) this.gl.uniform1f(opacityLoc, instance.opacity);
-                    
+
                     const animationState = instance.animationState;
-                    const animationMatrices = animationState.animationMatrices;
-                    const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+                    const nodeMatrix = animationState.animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+
                     if (nodeMatrixLoc) {
-                        if (animationMatrix) {
-                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix);
-                        } else {
-                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, mat4.create());
-                        }
+                        this.gl.uniformMatrix4fv(nodeMatrixLoc, false, nodeMatrix || mat4.create());
                     }
 
                     let noBoneMatrices = true;
@@ -495,26 +387,13 @@ export class InstanceManager implements IInstanceManager {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
                     }
 
-                    // Calculate normal matrix (inverse transpose of the upper 3x3 model matrix)
-                    const normalMatrix = mat3.create();
-                    // Get nodeMatrix from instance from animation matrices
-                    const nodeMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
-                    let finalMatrix: mat4;
-                    
-                    if (nodeMatrix) {
-                        const nodeWorldMatrix = mat4.create();
-                        mat4.multiply(nodeWorldMatrix, instance.worldMatrix, nodeMatrix);
-                        finalMatrix = nodeWorldMatrix;
-                    } else {
-                        finalMatrix = instance.worldMatrix;
-                    }
+                    const finalMatrix = nodeMatrix
+                        ? mat4.multiply(mat4.create(), instance.worldMatrix, nodeMatrix)
+                        : instance.worldMatrix;
 
-                    // Calculate normal matrix (inverse transpose)
+                    const normalMatrix = mat3.create();
                     mat3.normalFromMat4(normalMatrix, finalMatrix);
 
-                    // Apply coordinate conversion for static meshes (when nodeMatrix is null)
-                    // Shader converts normals from GLB (Y-up, RH) to C3 (Y-down, LH)
-                    // NormalMatrix must account for this conversion
                     if (!nodeMatrix) {
                         const coordConversion = mat3.fromValues(1, 0, 0, 0, -1, 0, 0, 0, -1);
                         mat3.multiply(normalMatrix, coordConversion, normalMatrix);
@@ -523,32 +402,15 @@ export class InstanceManager implements IInstanceManager {
                     const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
                     this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);
 
-                    // 3. Bind material properties (textures and uniforms)
-                    // Use materialIndex which may be overridden per instance
                     this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, materialIndex, modelData);
-
-                    // 4. Handle winding order for coordinate conversion
-                    // Since we flip Y and Z axes (2 flips), triangle winding is reversed
-                    // Switch from CCW (default) to CW for proper culling
                     this.gl.frontFace(this.gl.CW);
 
-                    // 5. Draw
                     if (primitive.indexBuffer) {
-                        this.gl.drawElements(
-                            this.gl.TRIANGLES,
-                            primitive.indexCount,
-                            primitive.indexType,
-                            0
-                        );
+                        this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
                     } else {
-                        this.gl.drawArrays(
-                            this.gl.TRIANGLES,
-                            0,
-                            primitive.vertexCount
-                        );
+                        this.gl.drawArrays(this.gl.TRIANGLES, 0, primitive.vertexCount);
                     }
-                    
-                    // Reset to default winding order
+
                     this.gl.frontFace(this.gl.CCW);
                 }
             }
@@ -563,67 +425,45 @@ export class InstanceManager implements IInstanceManager {
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData) return;
 
-        // Get shadow map shader
         const shadowShader = this.shadowMapShader;
         this.gl.useProgram(shadowShader);
 
-        // For each instance
         for (const instanceId of instanceGroup) {
             const instance = this.instances.get(instanceId);
             if (!instance) continue;
 
-            // KISS Frustum culling for shadow maps: Test instance bounding sphere
-            if (!this.isInstanceVisible(instance, modelData)) {
-                continue;
-            }
+            if (!this.isInstanceVisible(instance, modelData)) continue;
 
-            // Update world matrix for shadow rendering
             this.updateWorldMatrix(instance);
 
-            // For each mesh in the model
             for (const renderableNode of modelData.renderableNodes) {
-                // Check if this node is disabled for this instance
-                if (instance.allNodesDisabled) {
-                    continue; // Skip all nodes
-                }
-                
+                if (instance.allNodesDisabled) continue;
+
                 const nodeName = renderableNode.nodeName;
                 const nodeIdentifier = nodeName || `node_${renderableNode.node.indexData.nodeIndex}`;
-                
-                if (instance.disabledNodes.has(nodeIdentifier)) {
-                    continue; // Skip rendering this node
-                }
-                
+
+                if (instance.disabledNodes.has(nodeIdentifier)) continue;
+
                 const mesh = renderableNode.modelMesh;
                 for (const primitive of mesh.primitives) {
-                    // 1. Bind VAO
                     this.gl.bindVertexArray(primitive.vao);
 
-                    // 2. Set minimal required uniforms for shadow mapping using cached locations
                     const viewProjLoc = this.uniformCache.getLocation(shadowShader, 'u_LightViewProjection');
                     const modelLoc = this.uniformCache.getLocation(shadowShader, 'u_Model');
                     const nodeMatrixLoc = this.uniformCache.getLocation(shadowShader, 'u_NodeMatrix');
                     const useSkinningLoc = this.uniformCache.getLocation(shadowShader, 'u_UseSkinning');
 
-                    // Combine view and projection for efficiency
                     const lightViewProj = mat4.multiply(mat4.create(), viewProjection.projection, viewProjection.view);
                     this.gl.uniformMatrix4fv(viewProjLoc, false, lightViewProj);
                     this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
 
-                    // Handle animation matrices if present
                     const animationState = instance.animationState;
                     const animationMatrices = animationState.animationMatrices;
                     const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
-                    
-                    if (nodeMatrixLoc) {
-                        if (animationMatrix) {
-                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix);
-                        } else {
-                            this.gl.uniformMatrix4fv(nodeMatrixLoc, false, mat4.create());
-                        }
-                    }
 
-                    // Handle skinning
+                    if (nodeMatrixLoc) {
+                        this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix || mat4.create());
+                    }
                     let noBoneMatrices = true;
                     const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
                     if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
@@ -634,26 +474,14 @@ export class InstanceManager implements IInstanceManager {
                         this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
                     }
 
-                    // Handle winding order for coordinate conversion in shadow maps too
                     this.gl.frontFace(this.gl.CW);
-                    
-                    // Draw
+
                     if (primitive.indexBuffer) {
-                        this.gl.drawElements(
-                            this.gl.TRIANGLES,
-                            primitive.indexCount,
-                            primitive.indexType,
-                            0
-                        );
+                        this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
                     } else {
-                        this.gl.drawArrays(
-                            this.gl.TRIANGLES,
-                            0,
-                            primitive.vertexCount
-                        );
+                        this.gl.drawArrays(this.gl.TRIANGLES, 0, primitive.vertexCount);
                     }
-                    
-                    // Reset to default winding order
+
                     this.gl.frontFace(this.gl.CCW);
                 }
             }
@@ -710,11 +538,11 @@ export class InstanceManager implements IInstanceManager {
     public registerAnimationCallback(instanceId: number, callback: AnimationEventCallback): void {
         this._animationController.registerAnimationCallback(instanceId, callback);
     }
-    
+
     public unregisterAnimationCallback(instanceId: number): void {
         this._animationController.unregisterAnimationCallback(instanceId);
     }
-    
+
     private async cacheModelInWorkerIfNeeded(modelId: string): Promise<void> {
         // Only cache once per model
         if (this.cachedModelsInWorker.has(modelId)) {
@@ -742,30 +570,24 @@ export class InstanceManager implements IInstanceManager {
         return this.shadowMapManager;
     }
 
-    // Removed - Model handles these directly
-
     public enableModelNode(nodeName: string, instance: Model): void {
         const instanceData = this.instances.get(instance.instanceId.id);
-        if (instanceData) {
-            // If all nodes were disabled, we need to disable all except this one
-            if (instanceData.allNodesDisabled) {
-                instanceData.allNodesDisabled = false;
-                const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
-                if (modelData && modelData.nodeNameMap) {
-                    // Disable all nodes except the one being enabled
-                    for (const name of modelData.nodeNameMap.keys()) {
-                        if (name !== nodeName) {
-                            instanceData.disabledNodes.add(name);
-                        }
+        if (!instanceData) return;
+
+        if (instanceData.allNodesDisabled) {
+            instanceData.allNodesDisabled = false;
+            const modelData = this.modelLoader.getModelData(instance.instanceId.modelId);
+            if (modelData && modelData.nodeNameMap) {
+                for (const name of modelData.nodeNameMap.keys()) {
+                    if (name !== nodeName) {
+                        instanceData.disabledNodes.add(name);
                     }
                 }
-            } else {
-                instanceData.disabledNodes.delete(nodeName);
             }
+        } else {
+            instanceData.disabledNodes.delete(nodeName);
         }
     }
-
-    // Removed - Model handles these directly
 
     get animationController(): AnimationController {
         return this._animationController;
@@ -817,143 +639,77 @@ export class InstanceManager implements IInstanceManager {
         }
     }
 
-    /**
-     * Gets the world position of a bone/joint by name for a specific instance.
-     * @param instanceId The numeric ID of the model instance
-     * @param boneName The name of the bone/joint
-     * @returns [x, y, z] world position or null if bone/instance not found
-     */
     public getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null {
         const instanceData = this.instances.get(instanceId);
-        if (!instanceData) {
-            console.warn(`[InstanceManager] Instance ${instanceId} not found`);
-            return null;
-        }
+        if (!instanceData) return null;
 
         const modelData = this.modelLoader.getModelData(instanceData.instanceId.modelId);
-        if (!modelData) {
-            console.warn(`[InstanceManager] Model data not found for instance ${instanceId}`);
-            return null;
-        }
+        if (!modelData) return null;
 
-        // Debug: Log all bone positions once per tick for this instance
-        const currentTick = Date.now();
-        if (currentTick !== this.lastBoneLogTick) {
-            // New tick, clear logged instances
-            this.lastBoneLogTick = currentTick;
-            this.loggedInstancesThisTick.clear();
-        }
-
-        if (!this.loggedInstancesThisTick.has(instanceId)) {
-            // First bone request for this instance this tick - log all bones
-            this.loggedInstancesThisTick.add(instanceId);
-            console.log(`[InstanceManager] === All bone positions for instance ${instanceId} ===`);
-            console.log(`[InstanceManager] Instance position:`, Array.from(instanceData.transform.position));
-            console.log(`[InstanceManager] Instance scale:`, Array.from(instanceData.transform.scale));
-
-            if (modelData.jointData) {
-                const unitsScale = 100;
-                modelData.jointData.forEach((joint, idx) => {
-                    const boneMatrix = instanceData.animationState.animationMatrices.get(joint.index);
-                    if (boneMatrix) {
-                        // Unscaled
-                        const boneWorldMatrix = mat4.create();
-                        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, boneMatrix);
-                        const posUnscaled = [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
-
-                        // Scaled
-                        const scaledBoneMatrix = mat4.clone(boneMatrix);
-                        scaledBoneMatrix[12] *= unitsScale;
-                        scaledBoneMatrix[13] *= unitsScale;
-                        scaledBoneMatrix[14] *= unitsScale;
-                        const boneWorldMatrixScaled = mat4.create();
-                        mat4.multiply(boneWorldMatrixScaled, instanceData.worldMatrix, scaledBoneMatrix);
-                        const posScaled = [boneWorldMatrixScaled[12], boneWorldMatrixScaled[13], boneWorldMatrixScaled[14]];
-
-                        const modelPos = [boneMatrix[12], boneMatrix[13], boneMatrix[14]];
-                        console.log(`[InstanceManager]   [${idx}] ${joint.name}: world=${posUnscaled.map(v => v.toFixed(1))} scaled=${posScaled.map(v => v.toFixed(1))} model=${modelPos.map(v => v.toFixed(1))}`);
-                    }
-                });
-            }
-            console.log(`[InstanceManager] ====================================`);
-        }
-
-        // Find the node by name
         const boneNode = modelData.nodeNameMap?.get(boneName);
-        if (!boneNode) {
-            console.warn(`[InstanceManager] Bone "${boneName}" not found in model`);
-            return null;
-        }
+        if (!boneNode) return null;
 
-        // Get the bone's model-space transform from animation matrices
-        const boneModelMatrix = instanceData.animationState.animationMatrices.get(boneNode.indexData.nodeIndex);
-        if (!boneModelMatrix) {
-            console.warn(`[InstanceManager] Animation matrix not found for bone "${boneName}"`);
-            return null;
-        }
+        const meshNode = this.findMeshNodeForJoint(modelData, boneNode.indexData.nodeIndex);
+        if (!meshNode) return null;
 
-        // Apply units scale to bone position (temporary hardcoded to 100)
-        // The bone positions are in model-space units and need to match the mesh vertex scale
-        const unitsScale = 100;
-        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
-        scaledBoneMatrix[12] *= unitsScale;
-        scaledBoneMatrix[13] *= unitsScale;
-        scaledBoneMatrix[14] *= unitsScale;
-
-        // Transform to world space using instance's world matrix
-        const boneWorldMatrix = mat4.create();
-        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
-
-        // Extract translation component from world matrix
-        const position: [number, number, number] = [
-            boneWorldMatrix[12],
-            boneWorldMatrix[13],
-            boneWorldMatrix[14]
-        ];
-
-        return position;
+        return this.computeBoneWorldPosition(instanceData, meshNode, boneNode);
     }
 
-    /**
-     * Gets the world position of a bone/joint by index for a specific instance.
-     * @param instanceId The numeric ID of the model instance
-     * @param boneIndex The index of the bone/joint
-     * @returns [x, y, z] world position or null if bone/instance not found
-     */
     public getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null {
         const instanceData = this.instances.get(instanceId);
-        if (!instanceData) {
-            console.warn(`[InstanceManager] Instance ${instanceId} not found`);
-            return null;
+        if (!instanceData) return null;
+
+        const modelData = this.modelLoader.getModelData(instanceData.instanceId.modelId);
+        if (!modelData) return null;
+
+        const boneNode = modelData.nodeArray?.[boneIndex];
+        if (!boneNode) return null;
+
+        const meshNode = this.findMeshNodeForJoint(modelData, boneIndex);
+        if (!meshNode) return null;
+
+        return this.computeBoneWorldPosition(instanceData, meshNode, boneNode);
+    }
+
+    private findMeshNodeForJoint(modelData: any, jointNodeIndex: number): any {
+        for (const renderableNode of modelData.renderableNodes) {
+            if (renderableNode.useSkinning) {
+                const skin = renderableNode.node.getSkin?.();
+                if (skin) {
+                    const joints = skin.listJoints();
+                    if (joints.some((j: any) => j.indexData?.nodeIndex === jointNodeIndex)) {
+                        return renderableNode.node;
+                    }
+                }
+            }
         }
+        return null;
+    }
 
-        // Get the bone's model-space transform from animation matrices
-        const boneModelMatrix = instanceData.animationState.animationMatrices.get(boneIndex);
-        if (!boneModelMatrix) {
-            console.warn(`[InstanceManager] Animation matrix not found for bone index ${boneIndex}`);
-            return null;
-        }
+    private computeBoneWorldPosition(
+        instanceData: InstanceData,
+        meshNode: any,
+        boneNode: any
+    ): [number, number, number] | null {
+        const meshNodeMatrix = instanceData.animationState.animationMatrices.get(meshNode.indexData.nodeIndex);
+        if (!meshNodeMatrix) return null;
 
-        // Apply units scale to bone position (temporary hardcoded to 100)
-        // The bone positions are in model-space units and need to match the mesh vertex scale
-        const unitsScale = 100;
-        const scaledBoneMatrix = mat4.clone(boneModelMatrix);
-        scaledBoneMatrix[12] *= unitsScale;
-        scaledBoneMatrix[13] *= unitsScale;
-        scaledBoneMatrix[14] *= unitsScale;
+        const jointWorldMatrix = instanceData.animationState.animationMatrices.get(boneNode.indexData.nodeIndex);
+        if (!jointWorldMatrix) return null;
 
-        // Transform to world space using instance's world matrix
+        // boneWorld = instanceWorld × meshNodeWorld × boneLocal
+        // where boneLocal = meshNodeInverse × jointWorld
+        const meshNodeInverse = mat4.create();
+        mat4.invert(meshNodeInverse, meshNodeMatrix);
+
+        const boneLocalToMesh = mat4.create();
+        mat4.multiply(boneLocalToMesh, meshNodeInverse, jointWorldMatrix);
+
         const boneWorldMatrix = mat4.create();
-        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, scaledBoneMatrix);
+        mat4.multiply(boneWorldMatrix, instanceData.worldMatrix, meshNodeMatrix);
+        mat4.multiply(boneWorldMatrix, boneWorldMatrix, boneLocalToMesh);
 
-        // Extract translation component
-        const position: [number, number, number] = [
-            boneWorldMatrix[12],
-            boneWorldMatrix[13],
-            boneWorldMatrix[14]
-        ];
-
-        return position;
+        return [boneWorldMatrix[12], boneWorldMatrix[13], boneWorldMatrix[14]];
     }
 
     /**

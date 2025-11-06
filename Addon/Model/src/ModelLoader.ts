@@ -441,6 +441,8 @@ export class ModelLoader implements IModelLoader {
                 matrices[matrixOffset + 12], matrices[matrixOffset + 13], matrices[matrixOffset + 14], matrices[matrixOffset + 15]
             );
 
+            console.log('inverseBindMatrix for joint', index, JSON.stringify(originalInverseBindMatrix));
+
             // Apply coordinate conversion to inverse bind matrix
             const inverseBindMatrix = mat4.create();
             mat4.multiply(inverseBindMatrix, originalInverseBindMatrix, COORDINATE_CONVERSION_MATRIX);

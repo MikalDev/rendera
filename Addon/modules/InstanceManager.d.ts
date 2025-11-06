@@ -20,8 +20,6 @@ export declare class InstanceManager implements IInstanceManager {
     private dirtyInstances;
     private lastRenderTick;
     private cachedModelsInWorker;
-    private lastBoneLogTick;
-    private loggedInstancesThisTick;
     private _animationController;
     private frustum;
     constructor(gl: WebGL2RenderingContext, modelLoader: ModelLoader, gpuResources: IGPUResourceManager);
@@ -44,7 +42,6 @@ export declare class InstanceManager implements IInstanceManager {
     invalidateAnimationCache(instanceId: number): void;
     setModelBindPose(instance: Model): void;
     updateModelAnimation(instance: Model, deltaTime: number): void;
-    private createError;
     private addToModelGroup;
     private removeFromModelGroup;
     updateAnimation(instance: InstanceData, deltaTime: number): void;
@@ -79,20 +76,10 @@ export declare class InstanceManager implements IInstanceManager {
      * @param materialIndex The material index to use
      */
     setInstanceMaterial(instance: Model, nodeName: string, materialIndex: number): void;
-    /**
-     * Gets the world position of a bone/joint by name for a specific instance.
-     * @param instanceId The numeric ID of the model instance
-     * @param boneName The name of the bone/joint
-     * @returns [x, y, z] world position or null if bone/instance not found
-     */
     getBoneWorldPosition(instanceId: number, boneName: string): [number, number, number] | null;
-    /**
-     * Gets the world position of a bone/joint by index for a specific instance.
-     * @param instanceId The numeric ID of the model instance
-     * @param boneIndex The index of the bone/joint
-     * @returns [x, y, z] world position or null if bone/instance not found
-     */
     getBoneWorldPositionByIndex(instanceId: number, boneIndex: number): [number, number, number] | null;
+    private findMeshNodeForJoint;
+    private computeBoneWorldPosition;
     /**
      * Gets a list of all bones/joints for a model with their indices, names, and hierarchy.
      * @param modelId The ID of the model
