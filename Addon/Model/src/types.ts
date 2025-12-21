@@ -223,6 +223,9 @@ export interface IInstanceManager {
         instanceGroup: Set<number>,
         viewProjection: { view: mat4, projection: mat4 }
     ): void;
+
+    // Instance queries
+    hasInstances(): boolean;
 }
 
 export interface IModel {

@@ -757,6 +757,14 @@ export class InstanceManager implements IInstanceManager {
 
         return this.getModelBones(instanceData.instanceId.modelId);
     }
+
+    /**
+     * Checks if there are any model instances currently registered.
+     * @returns true if there are any instances, false otherwise
+     */
+    public hasInstances(): boolean {
+        return this.instances.size > 0;
+    }
 }
 
 // @ts-ignore

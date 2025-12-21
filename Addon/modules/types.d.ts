@@ -152,6 +152,7 @@ export interface IInstanceManager {
         view: mat4;
         projection: mat4;
     }): void;
+    hasInstances(): boolean;
 }
 export interface IModel {
     readonly instanceId: InstanceId;

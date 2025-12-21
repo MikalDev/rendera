@@ -14350,7 +14350,6 @@ class ModelLoader {
             // Get the inverse bind matrix for this joint (16 floats per matrix)
             const matrixOffset = index * 16;
             const originalInverseBindMatrix = fromValues$1(matrices[matrixOffset], matrices[matrixOffset + 1], matrices[matrixOffset + 2], matrices[matrixOffset + 3], matrices[matrixOffset + 4], matrices[matrixOffset + 5], matrices[matrixOffset + 6], matrices[matrixOffset + 7], matrices[matrixOffset + 8], matrices[matrixOffset + 9], matrices[matrixOffset + 10], matrices[matrixOffset + 11], matrices[matrixOffset + 12], matrices[matrixOffset + 13], matrices[matrixOffset + 14], matrices[matrixOffset + 15]);
-            console.log('inverseBindMatrix for joint', index, JSON.stringify(originalInverseBindMatrix));
             // Apply coordinate conversion to inverse bind matrix
             const inverseBindMatrix = create$3();
             multiply(inverseBindMatrix, originalInverseBindMatrix, COORDINATE_CONVERSION_MATRIX);
@@ -19216,6 +19215,13 @@ class InstanceManager {
             return null;
         }
         return this.getModelBones(instanceData.instanceId.modelId);
+    }
+    /**
+     * Checks if there are any model instances currently registered.
+     * @returns true if there are any instances, false otherwise
+     */
+    hasInstances() {
+        return this.instances.size > 0;
     }
 }
 // @ts-ignore

@@ -118,7 +118,7 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 	async _tick() {
 		const wasInitialized = this.initialized;
 		if (!this.initialize()) return;
-		
+
 		// Trigger onRenderaReady on the first successful initialization during tick
 		if (!wasInitialized && this.initialized) {
 			// Use setTimeout to ensure the trigger happens after the runtime is ready
@@ -141,6 +141,11 @@ class LostInstance extends globalThis.ISDKInstanceBase {
 			console.info('[rendera] processPendingDocuments', count);
 		}
 		this._currentTick++;
+
+		// Request render update if there are any visible model instances
+		if (this.instanceManager && this.instanceManager.hasInstances()) {
+			this.runtime.sdk.updateRender();
+		}
 	}
 
 	public getViewMatrix() {

@@ -106,5 +106,10 @@ export declare class InstanceManager implements IInstanceManager {
             children: number[];
         }>;
     } | null;
+    /**
+     * Checks if there are any model instances currently registered.
+     * @returns true if there are any instances, false otherwise
+     */
+    hasInstances(): boolean;
 }
 //# sourceMappingURL=InstanceManager.d.ts.map
