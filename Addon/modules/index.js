@@ -16550,6 +16550,9 @@ class AnimationWorkerManager {
         this.requestCounter = 0;
         this.cachedModels = new Set();
         this.instanceCache = new Map();
+        // Batching state
+        this.pendingBatches = new Map();
+        this.flushScheduled = false;
         this.pendingCacheRequests = [];
         // No runtime needed with standard Worker API
     }
@@ -16801,41 +16804,92 @@ class AnimationWorkerManager {
             isInitialized: this.isInitialized
         };
     }
-    // Fire-and-forget animation request with callback
+    // Fire-and-forget animation request with callback (batched per-worker)
     requestAnimation(instanceId, modelId, animationName, animationTime, loop, needsBones, blendSource, blendDuration, callback) {
         if (this.workers.length === 0 || !this.isInitialized || !this.areAllWorkersReady()) {
             return;
         }
         const requestId = ++this.requestCounter;
-        // Select worker using round-robin based on instanceId (KISS approach)
+        // Select worker using round-robin based on instanceId
         const workerIndex = instanceId % this.workers.length;
-        const selectedWorker = this.workers[workerIndex];
-        // Store callback instead of promise handlers
-        this.pendingRequests.set(requestId, {
-            resolve: callback,
-            reject: (error) => console.error('[AnimationWorkerManager] Animation failed:', error),
-            instanceId
-        });
-        // Prepare message and transfers
-        const message = {
-            type: 'COMPUTE_ANIMATION',
+        // Add to batch for this worker
+        if (!this.pendingBatches.has(workerIndex)) {
+            this.pendingBatches.set(workerIndex, []);
+        }
+        this.pendingBatches.get(workerIndex).push({
             instanceId,
             requestId,
             modelId,
             animationName,
             animationTime,
             loop,
-            needsBones
-        };
-        const transfers = [];
-        // Add blend parameters if provided
-        if (blendSource && blendDuration) {
-            message.blendSource = blendSource;
-            message.blendDuration = blendDuration;
-            transfers.push(blendSource.buffer);
+            needsBones,
+            blendSource,
+            blendDuration,
+            callback
+        });
+        // Schedule flush if not already scheduled
+        if (!this.flushScheduled) {
+            this.flushScheduled = true;
+            queueMicrotask(() => this.flushBatches());
         }
-        // Send request to selected worker
-        selectedWorker.postMessage(message, transfers);
+    }
+    // Flush all pending batches to workers
+    flushBatches() {
+        this.flushScheduled = false;
+        for (const [workerIndex, batch] of this.pendingBatches) {
+            if (batch.length === 0)
+                continue;
+            const worker = this.workers[workerIndex];
+            const transfers = [];
+            const requestIds = [];
+            // Prepare batch message
+            const requests = batch.map(req => {
+                // Store callback for later
+                this.pendingRequests.set(req.requestId, {
+                    resolve: req.callback,
+                    reject: (error) => console.error('[AnimationWorkerManager] Animation failed:', error),
+                    instanceId: req.instanceId
+                });
+                requestIds.push(req.requestId);
+                const msg = {
+                    instanceId: req.instanceId,
+                    requestId: req.requestId,
+                    modelId: req.modelId,
+                    animationName: req.animationName,
+                    animationTime: req.animationTime,
+                    loop: req.loop,
+                    needsBones: req.needsBones
+                };
+                // Add blend parameters if provided
+                if (req.blendSource && req.blendDuration) {
+                    msg.blendSource = req.blendSource;
+                    msg.blendDuration = req.blendDuration;
+                    transfers.push(req.blendSource.buffer);
+                }
+                return msg;
+            });
+            // Send batched message to worker with error handling
+            try {
+                worker.postMessage({
+                    type: 'BATCH_COMPUTE',
+                    requests
+                }, transfers);
+            }
+            catch (error) {
+                // Clean up pending requests on postMessage failure
+                console.error('[AnimationWorkerManager] Failed to post batch to worker:', error);
+                for (const requestId of requestIds) {
+                    const request = this.pendingRequests.get(requestId);
+                    if (request) {
+                        this.pendingRequests.delete(requestId);
+                        request.reject(error instanceof Error ? error : new Error(String(error)));
+                    }
+                }
+            }
+        }
+        // Clear all batches
+        this.pendingBatches.clear();
     }
     // Keep the old method for backward compatibility but mark as deprecated
     /** @deprecated Use requestAnimation for better performance */
@@ -16864,11 +16918,33 @@ class AnimationWorkerManager {
     }
     // Handle worker responses
     handleWorkerMessage(event) {
-        const { type, requestId } = event.data;
-        if (type === 'ANIMATION_COMPUTED') {
-            const request = this.pendingRequests.get(requestId);
+        const { type } = event.data;
+        if (type === 'BATCH_RESULT') {
+            // Handle batched results
+            const results = event.data.results;
+            for (const res of results) {
+                const request = this.pendingRequests.get(res.requestId);
+                if (request) {
+                    this.pendingRequests.delete(res.requestId);
+                    if (res.error) {
+                        // Handle failed request
+                        request.reject(new Error(res.error));
+                    }
+                    else {
+                        request.resolve({
+                            nodeTransforms: res.nodeTransforms,
+                            animationMatrices: res.animationMatrices,
+                            boneMatricesMap: res.boneMatricesMap
+                        });
+                    }
+                }
+            }
+        }
+        else if (type === 'ANIMATION_COMPUTED') {
+            // Handle single result (backward compatibility)
+            const request = this.pendingRequests.get(event.data.requestId);
             if (request) {
-                this.pendingRequests.delete(requestId);
+                this.pendingRequests.delete(event.data.requestId);
                 const result = {
                     nodeTransforms: event.data.nodeTransforms,
                     animationMatrices: event.data.animationMatrices,
@@ -16897,7 +16973,14 @@ class AnimationWorkerManager {
         this.workers = [];
         this.workerReadyStates = [];
         this.isInitialized = false;
+        this.flushScheduled = false;
+        // Reject pending animation requests
+        for (const request of this.pendingRequests.values()) {
+            request.reject(new Error('Worker manager terminated'));
+        }
         this.pendingRequests.clear();
+        // Clear pending batches (callbacks haven't been stored yet)
+        this.pendingBatches.clear();
         this.instanceCache.clear();
         // Reject any pending cache requests
         for (const request of this.pendingCacheRequests) {

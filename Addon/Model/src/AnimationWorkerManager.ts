@@ -14,6 +14,19 @@ interface AnimationResult {
     boneMatricesMap?: Map<number, Float32Array>;
 }
 
+interface BatchedRequest {
+    instanceId: number;
+    requestId: number;
+    modelId: string;
+    animationName: string;
+    animationTime: number;
+    loop: boolean;
+    needsBones: boolean;
+    blendSource?: Float32Array;
+    blendDuration?: number;
+    callback: (result: AnimationResult) => void;
+}
+
 export class AnimationWorkerManager {
     private workers: Worker[] = [];
     private workerCount: number = 8;
@@ -23,6 +36,11 @@ export class AnimationWorkerManager {
     private requestCounter = 0;
     private cachedModels = new Set<string>();
     private instanceCache = new Map<number, { modelId: string; lastTime: number; }>();
+
+    // Batching state
+    private pendingBatches: Map<number, BatchedRequest[]> = new Map();
+    private flushScheduled = false;
+
     private pendingCacheRequests: Array<{
         modelId: string;
         modelData: any;
@@ -358,7 +376,7 @@ export class AnimationWorkerManager {
         };
     }
     
-    // Fire-and-forget animation request with callback
+    // Fire-and-forget animation request with callback (batched per-worker)
     public requestAnimation(
         instanceId: number,
         modelId: string,
@@ -373,43 +391,99 @@ export class AnimationWorkerManager {
         if (this.workers.length === 0 || !this.isInitialized || !this.areAllWorkersReady()) {
             return;
         }
-        
+
         const requestId = ++this.requestCounter;
-        
-        // Select worker using round-robin based on instanceId (KISS approach)
+
+        // Select worker using round-robin based on instanceId
         const workerIndex = instanceId % this.workers.length;
-        const selectedWorker = this.workers[workerIndex];
-        
-        // Store callback instead of promise handlers
-        this.pendingRequests.set(requestId, { 
-            resolve: callback, 
-            reject: (error) => console.error('[AnimationWorkerManager] Animation failed:', error),
-            instanceId 
-        });
-        
-        // Prepare message and transfers
-        const message: any = {
-            type: 'COMPUTE_ANIMATION',
+
+        // Add to batch for this worker
+        if (!this.pendingBatches.has(workerIndex)) {
+            this.pendingBatches.set(workerIndex, []);
+        }
+
+        this.pendingBatches.get(workerIndex)!.push({
             instanceId,
             requestId,
             modelId,
             animationName,
             animationTime,
             loop,
-            needsBones
-        };
-        
-        const transfers: ArrayBuffer[] = [];
-        
-        // Add blend parameters if provided
-        if (blendSource && blendDuration) {
-            message.blendSource = blendSource;
-            message.blendDuration = blendDuration;
-            transfers.push(blendSource.buffer);
+            needsBones,
+            blendSource,
+            blendDuration,
+            callback
+        });
+
+        // Schedule flush if not already scheduled
+        if (!this.flushScheduled) {
+            this.flushScheduled = true;
+            queueMicrotask(() => this.flushBatches());
         }
-        
-        // Send request to selected worker
-        selectedWorker.postMessage(message, transfers);
+    }
+
+    // Flush all pending batches to workers
+    private flushBatches(): void {
+        this.flushScheduled = false;
+
+        for (const [workerIndex, batch] of this.pendingBatches) {
+            if (batch.length === 0) continue;
+
+            const worker = this.workers[workerIndex];
+            const transfers: ArrayBuffer[] = [];
+            const requestIds: number[] = [];
+
+            // Prepare batch message
+            const requests = batch.map(req => {
+                // Store callback for later
+                this.pendingRequests.set(req.requestId, {
+                    resolve: req.callback,
+                    reject: (error) => console.error('[AnimationWorkerManager] Animation failed:', error),
+                    instanceId: req.instanceId
+                });
+                requestIds.push(req.requestId);
+
+                const msg: any = {
+                    instanceId: req.instanceId,
+                    requestId: req.requestId,
+                    modelId: req.modelId,
+                    animationName: req.animationName,
+                    animationTime: req.animationTime,
+                    loop: req.loop,
+                    needsBones: req.needsBones
+                };
+
+                // Add blend parameters if provided
+                if (req.blendSource && req.blendDuration) {
+                    msg.blendSource = req.blendSource;
+                    msg.blendDuration = req.blendDuration;
+                    transfers.push(req.blendSource.buffer);
+                }
+
+                return msg;
+            });
+
+            // Send batched message to worker with error handling
+            try {
+                worker.postMessage({
+                    type: 'BATCH_COMPUTE',
+                    requests
+                }, transfers);
+            } catch (error) {
+                // Clean up pending requests on postMessage failure
+                console.error('[AnimationWorkerManager] Failed to post batch to worker:', error);
+                for (const requestId of requestIds) {
+                    const request = this.pendingRequests.get(requestId);
+                    if (request) {
+                        this.pendingRequests.delete(requestId);
+                        request.reject(error instanceof Error ? error : new Error(String(error)));
+                    }
+                }
+            }
+        }
+
+        // Clear all batches
+        this.pendingBatches.clear();
     }
     
     // Keep the old method for backward compatibility but mark as deprecated
@@ -451,12 +525,39 @@ export class AnimationWorkerManager {
     
     // Handle worker responses
     private handleWorkerMessage(event: MessageEvent): void {
-        const { type, requestId } = event.data;
-        
-        if (type === 'ANIMATION_COMPUTED') {
-            const request = this.pendingRequests.get(requestId);
+        const { type } = event.data;
+
+        if (type === 'BATCH_RESULT') {
+            // Handle batched results
+            const results = event.data.results as Array<{
+                requestId: number;
+                nodeTransforms: Float32Array;
+                animationMatrices: Float32Array;
+                boneMatricesMap?: Map<number, Float32Array>;
+                error?: string;
+            }>;
+
+            for (const res of results) {
+                const request = this.pendingRequests.get(res.requestId);
+                if (request) {
+                    this.pendingRequests.delete(res.requestId);
+                    if (res.error) {
+                        // Handle failed request
+                        request.reject(new Error(res.error));
+                    } else {
+                        request.resolve({
+                            nodeTransforms: res.nodeTransforms,
+                            animationMatrices: res.animationMatrices,
+                            boneMatricesMap: res.boneMatricesMap
+                        });
+                    }
+                }
+            }
+        } else if (type === 'ANIMATION_COMPUTED') {
+            // Handle single result (backward compatibility)
+            const request = this.pendingRequests.get(event.data.requestId);
             if (request) {
-                this.pendingRequests.delete(requestId);
+                this.pendingRequests.delete(event.data.requestId);
                 const result: AnimationResult = {
                     nodeTransforms: event.data.nodeTransforms,
                     animationMatrices: event.data.animationMatrices,
@@ -464,7 +565,7 @@ export class AnimationWorkerManager {
                 };
                 request.resolve(result);
             }
-        } else if (type !== 'WORKER_READY' && 
+        } else if (type !== 'WORKER_READY' &&
                    type !== 'MODEL_CACHED') {
             console.warn('[AnimationWorkerManager] Unknown message type from worker:', type);
         }
@@ -487,9 +588,19 @@ export class AnimationWorkerManager {
         this.workers = [];
         this.workerReadyStates = [];
         this.isInitialized = false;
+        this.flushScheduled = false;
+
+        // Reject pending animation requests
+        for (const request of this.pendingRequests.values()) {
+            request.reject(new Error('Worker manager terminated'));
+        }
         this.pendingRequests.clear();
+
+        // Clear pending batches (callbacks haven't been stored yet)
+        this.pendingBatches.clear();
+
         this.instanceCache.clear();
-        
+
         // Reject any pending cache requests
         for (const request of this.pendingCacheRequests) {
             request.reject(new Error('Worker manager terminated'));

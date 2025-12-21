@@ -31,7 +31,7 @@ interface CacheModelRequest {
 
 // Compute full animation (keyframes + hierarchy + bones)
 interface ComputeAnimationRequest {
-    type: 'COMPUTE_ANIMATION';
+    type?: 'COMPUTE_ANIMATION';
     instanceId: number;
     requestId: number;
     modelId: string;
@@ -42,6 +42,24 @@ interface ComputeAnimationRequest {
     // Optional blending parameters
     blendSource?: Float32Array;  // Packed source transforms (10 floats per node)
     blendDuration?: number;       // Total blend duration
+}
+
+// Batch compute request
+interface BatchComputeRequest {
+    type: 'BATCH_COMPUTE';
+    requests: ComputeAnimationRequest[];
+}
+
+// Batch result response
+interface BatchResultResponse {
+    type: 'BATCH_RESULT';
+    results: Array<{
+        requestId: number;
+        nodeTransforms: Float32Array;
+        animationMatrices: Float32Array;
+        boneMatricesMap?: Map<number, Float32Array>;
+        error?: string;  // Error message if computation failed
+    }>;
 }
 
 
@@ -150,137 +168,198 @@ self.onmessage = (event: MessageEvent) => {
         
     } else if (type === 'COMPUTE_ANIMATION') {
         handleComputeAnimation(event.data as ComputeAnimationRequest);
+    } else if (type === 'BATCH_COMPUTE') {
+        handleBatchCompute(event.data as BatchComputeRequest);
     } else {
         console.warn('[AnimationWorker] Unknown message type:', type);
     }
 };
 
+// Handle batch compute request
+function handleBatchCompute(request: BatchComputeRequest): void {
+    const results: BatchResultResponse['results'] = [];
+    const allTransfers: ArrayBuffer[] = [];
 
-// Handle full animation computation request
-function handleComputeAnimation(request: ComputeAnimationRequest): void {
-    const { instanceId, requestId, modelId, animationName, animationTime, loop, needsBones, blendSource, blendDuration } = request;
-    
-    try {
-        // Get cached data
-        const hierarchy = hierarchyCache.get(modelId);
-        if (!hierarchy) {
-            throw new Error(`Hierarchy not cached for model: ${modelId}`);
-        }
-        
-        const animations = animationCache.get(modelId);
-        const animation = animations?.get(animationName);
-        if (!animation) {
-            throw new Error(`Animation ${animationName} not cached for model: ${modelId}`);
-        }
-        
-        // Get or create instance state
-        let instanceState = instanceStates.get(instanceId);
-        if (!instanceState) {
-            instanceState = { 
-                modelId,
-                cachedKeyframeIndices: new Map()
-            };
-            instanceStates.set(instanceId, instanceState);
-        } else {
-            // Ensure cachedKeyframeIndices exists for existing instances
-            if (!instanceState.cachedKeyframeIndices) {
-                instanceState.cachedKeyframeIndices = new Map();
-            }
-        }
-        
-        // Update time with looping
-        const time = loop ? (animationTime % animation.duration) : Math.min(animationTime, animation.duration);
-        
-        // Step 1: Interpolate keyframes to get node transforms
-        let nodeTransforms = interpolateAnimation(
-            animation,
-            hierarchy,
-            time,
-            instanceState.cachedKeyframeIndices!
-        );
-        
-        // Step 1.5: Handle blending
-        // Cache blend state if provided
-        if (blendSource && blendDuration && blendDuration > 0) {
-            // New blend starting - cache it
-            instanceState.blendSource = new Float32Array(blendSource);
-            instanceState.blendDuration = blendDuration;
-            instanceState.blendStartAnimation = animationName;
-        }
-        
-        // Apply cached blend if active
-        if (instanceState.blendSource && 
-            instanceState.blendDuration && 
-            instanceState.blendStartAnimation === animationName) {
-            
-            const blendProgress = Math.min(1, animationTime / instanceState.blendDuration);
-            if (blendProgress < 1) {
-                nodeTransforms = blendNodeTransforms(
-                    instanceState.blendSource,
-                    nodeTransforms,
-                    blendProgress,
-                    hierarchy.nodeCount
-                );
+    for (const req of request.requests) {
+        try {
+            const result = computeAnimationInternal(req);
+            if (result) {
+                results.push({
+                    requestId: req.requestId,
+                    nodeTransforms: result.nodeTransforms,
+                    animationMatrices: result.animationMatrices,
+                    boneMatricesMap: result.boneMatricesMap
+                });
+
+                // Collect transfers
+                allTransfers.push(result.nodeTransforms.buffer);
+                allTransfers.push(result.animationMatrices.buffer);
+                if (result.boneMatricesMap) {
+                    for (const boneMatrices of result.boneMatricesMap.values()) {
+                        allTransfers.push(boneMatrices.buffer);
+                    }
+                }
             } else {
-                // Blend complete - clear cached state
-                instanceState.blendSource = undefined;
-                instanceState.blendDuration = undefined;
-                instanceState.blendStartAnimation = undefined;
+                // Report failed request back to main thread (e.g., model/animation not cached)
+                results.push({
+                    requestId: req.requestId,
+                    nodeTransforms: new Float32Array(0),
+                    animationMatrices: new Float32Array(0),
+                    error: `Animation computation failed for ${req.modelId}/${req.animationName}`
+                });
             }
-        } else if (instanceState.blendStartAnimation !== animationName) {
-            // Different animation started - clear old blend
+        } catch (error) {
+            // Report exception back to main thread
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('[AnimationWorker] Error in batch compute for request', req.requestId, error);
+            results.push({
+                requestId: req.requestId,
+                nodeTransforms: new Float32Array(0),
+                animationMatrices: new Float32Array(0),
+                error: errorMessage
+            });
+        }
+    }
+
+    // Send batched response
+    const response: BatchResultResponse = {
+        type: 'BATCH_RESULT',
+        results
+    };
+
+    self.postMessage(response, allTransfers);
+}
+
+
+// Internal animation computation - returns result for batching or direct use
+function computeAnimationInternal(request: ComputeAnimationRequest): {
+    nodeTransforms: Float32Array;
+    animationMatrices: Float32Array;
+    boneMatricesMap?: Map<number, Float32Array>;
+} | null {
+    const { instanceId, modelId, animationName, animationTime, loop, needsBones, blendSource, blendDuration } = request;
+
+    // Get cached data
+    const hierarchy = hierarchyCache.get(modelId);
+    if (!hierarchy) {
+        console.error(`[AnimationWorker] Hierarchy not cached for model: ${modelId}`);
+        return null;
+    }
+
+    const animations = animationCache.get(modelId);
+    const animation = animations?.get(animationName);
+    if (!animation) {
+        console.error(`[AnimationWorker] Animation ${animationName} not cached for model: ${modelId}`);
+        return null;
+    }
+
+    // Get or create instance state
+    let instanceState = instanceStates.get(instanceId);
+    if (!instanceState) {
+        instanceState = {
+            modelId,
+            cachedKeyframeIndices: new Map()
+        };
+        instanceStates.set(instanceId, instanceState);
+    } else {
+        if (!instanceState.cachedKeyframeIndices) {
+            instanceState.cachedKeyframeIndices = new Map();
+        }
+    }
+
+    // Update time with looping
+    const time = loop ? (animationTime % animation.duration) : Math.min(animationTime, animation.duration);
+
+    // Step 1: Interpolate keyframes to get node transforms
+    let nodeTransforms = interpolateAnimation(
+        animation,
+        hierarchy,
+        time,
+        instanceState.cachedKeyframeIndices!
+    );
+
+    // Step 1.5: Handle blending
+    if (blendSource && blendDuration && blendDuration > 0) {
+        instanceState.blendSource = new Float32Array(blendSource);
+        instanceState.blendDuration = blendDuration;
+        instanceState.blendStartAnimation = animationName;
+    }
+
+    if (instanceState.blendSource &&
+        instanceState.blendDuration &&
+        instanceState.blendStartAnimation === animationName) {
+
+        const blendProgress = Math.min(1, animationTime / instanceState.blendDuration);
+        if (blendProgress < 1) {
+            nodeTransforms = blendNodeTransforms(
+                instanceState.blendSource,
+                nodeTransforms,
+                blendProgress,
+                hierarchy.nodeCount
+            );
+        } else {
             instanceState.blendSource = undefined;
             instanceState.blendDuration = undefined;
             instanceState.blendStartAnimation = undefined;
         }
-        
-        // Step 2: Compute hierarchy transforms
-        const animationMatrices = computeHierarchyTransforms(
-            nodeTransforms,
-            hierarchy
-        );
-        
-        // Step 3: Compute bone matrices if needed (for ALL skins)
-        let boneMatricesMap: Map<number, Float32Array> | undefined;
-        if (needsBones) {
-            const modelData = modelCache.get(modelId);
-            if (modelData) {
-                boneMatricesMap = computeAllBoneMatricesFromHierarchy(
-                    animationMatrices,
-                    modelData,
-                    hierarchy.nodeCount
-                );
-            }
+    } else if (instanceState.blendStartAnimation !== animationName) {
+        instanceState.blendSource = undefined;
+        instanceState.blendDuration = undefined;
+        instanceState.blendStartAnimation = undefined;
+    }
+
+    // Step 2: Compute hierarchy transforms
+    const animationMatrices = computeHierarchyTransforms(
+        nodeTransforms,
+        hierarchy
+    );
+
+    // Step 3: Compute bone matrices if needed
+    let boneMatricesMap: Map<number, Float32Array> | undefined;
+    if (needsBones) {
+        const modelData = modelCache.get(modelId);
+        if (modelData) {
+            boneMatricesMap = computeAllBoneMatricesFromHierarchy(
+                animationMatrices,
+                modelData,
+                hierarchy.nodeCount
+            );
         }
-        
-        // Update instance state
-        instanceState.lastAnimationName = animationName;
-        instanceState.lastAnimationTime = time;
-        
-        // Send response
+    }
+
+    // Update instance state
+    instanceState.lastAnimationName = animationName;
+    instanceState.lastAnimationTime = time;
+
+    return { nodeTransforms, animationMatrices, boneMatricesMap };
+}
+
+// Handle single animation computation request (backward compatibility)
+function handleComputeAnimation(request: ComputeAnimationRequest): void {
+    try {
+        const result = computeAnimationInternal(request);
+        if (!result) return;
+
         const response: ComputeAnimationResponse = {
             type: 'ANIMATION_COMPUTED',
-            instanceId,
-            requestId,
-            nodeTransforms,
-            animationMatrices,
-            boneMatricesMap
+            instanceId: request.instanceId,
+            requestId: request.requestId,
+            nodeTransforms: result.nodeTransforms,
+            animationMatrices: result.animationMatrices,
+            boneMatricesMap: result.boneMatricesMap
         };
-        
-        // Transfer ownership of arrays
+
         const transfers: ArrayBuffer[] = [
-            nodeTransforms.buffer,
-            animationMatrices.buffer
+            result.nodeTransforms.buffer,
+            result.animationMatrices.buffer
         ];
-        // Add all bone matrices to transfers
-        if (boneMatricesMap) {
-            for (const boneMatrices of boneMatricesMap.values()) {
+        if (result.boneMatricesMap) {
+            for (const boneMatrices of result.boneMatricesMap.values()) {
                 transfers.push(boneMatrices.buffer);
             }
         }
-        
+
         self.postMessage(response, transfers);
-        
     } catch (error) {
         console.error('[AnimationWorker] Error computing animation:', error);
     }

@@ -13,6 +13,8 @@ export declare class AnimationWorkerManager {
     private requestCounter;
     private cachedModels;
     private instanceCache;
+    private pendingBatches;
+    private flushScheduled;
     private pendingCacheRequests;
     constructor();
     private areAllWorkersReady;
@@ -36,6 +38,7 @@ export declare class AnimationWorkerManager {
         isInitialized: boolean;
     };
     requestAnimation(instanceId: number, modelId: string, animationName: string, animationTime: number, loop: boolean, needsBones: boolean, blendSource: Float32Array | undefined, blendDuration: number | undefined, callback: (result: AnimationResult) => void): void;
+    private flushBatches;
     /** @deprecated Use requestAnimation for better performance */
     computeAnimation(instanceId: number, modelId: string, animationName: string, animationTime: number, loop: boolean, needsBones: boolean): Promise<AnimationResult>;
     private handleWorkerMessage;
