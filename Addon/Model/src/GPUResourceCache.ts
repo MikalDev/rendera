@@ -34,22 +34,17 @@ export class GPUResourceCache implements IGPUResourceCache {
         if (tracker) {
             this.cachedModelState = tracker.snapshot();
 
-            // Always check if tracker is in sync with GL reality
+            // Check critical state that C3 might change via cached original methods
             const actualFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
-            const trackerFramebuffer = this.cachedModelState.boundFramebuffer;
+            const actualProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
+            const trackerState = tracker.getState();
 
-            // Detect mismatch - tracker and GL disagree
-            if (trackerFramebuffer !== actualFramebuffer) {
-                console.warn('[rendera] Tracker out of sync! Tracker FB:', trackerFramebuffer, 'Actual GL FB:', actualFramebuffer);
-                console.warn('[rendera] Triggering full GL state sync...');
-
-                // Sync the entire tracker state with GL reality
+            // Detect mismatch - tracker and GL disagree on critical state
+            if (trackerState.boundFramebuffer !== actualFramebuffer ||
+                trackerState.currentProgram !== actualProgram) {
+                // Sync and retake snapshot
                 tracker.syncWithGLState();
-
-                // Take a fresh snapshot with the synced state
                 this.cachedModelState = tracker.snapshot();
-
-                console.log('[rendera] Resync complete, new snapshot FB:', this.cachedModelState.boundFramebuffer);
             }
 
             return;

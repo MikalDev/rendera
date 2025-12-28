@@ -63,7 +63,8 @@ export interface WebGLState {
     // Stencil state
     stencilFunc: number;
     stencilRef: number;
-    stencilMask: number;
+    stencilFuncMask: number;  // Mask for stencilFunc comparison
+    stencilWriteMask: number; // Mask for stencilMask (write mask)
     stencilFail: number;
     stencilZFail: number;
     stencilZPass: number;
@@ -135,7 +136,8 @@ export class WebGLStateTracker {
             depthRange: [0, 1],
             stencilFunc: gl.ALWAYS,
             stencilRef: 0,
-            stencilMask: 0xFFFFFFFF,
+            stencilFuncMask: 0xFFFFFFFF,
+            stencilWriteMask: 0xFFFFFFFF,
             stencilFail: gl.KEEP,
             stencilZFail: gl.KEEP,
             stencilZPass: gl.KEEP,
@@ -361,12 +363,12 @@ export class WebGLStateTracker {
         (gl as any).stencilFunc = (func: number, ref: number, mask: number) => {
             state.stencilFunc = func;
             state.stencilRef = ref;
-            state.stencilMask = mask;
+            state.stencilFuncMask = mask;
             return original.stencilFunc(func, ref, mask);
         };
 
         (gl as any).stencilMask = (mask: number) => {
-            state.stencilMask = mask;
+            state.stencilWriteMask = mask;
             return original.stencilMask(mask);
         };
 
@@ -488,7 +490,8 @@ export class WebGLStateTracker {
             depthRange: [...this.state.depthRange],
             stencilFunc: this.state.stencilFunc,
             stencilRef: this.state.stencilRef,
-            stencilMask: this.state.stencilMask,
+            stencilFuncMask: this.state.stencilFuncMask,
+            stencilWriteMask: this.state.stencilWriteMask,
             stencilFail: this.state.stencilFail,
             stencilZFail: this.state.stencilZFail,
             stencilZPass: this.state.stencilZPass,
@@ -623,7 +626,8 @@ export class WebGLStateTracker {
         original.depthRange(...snapshot.depthRange);
 
         // Restore stencil state
-        original.stencilFunc(snapshot.stencilFunc, snapshot.stencilRef, snapshot.stencilMask);
+        original.stencilFunc(snapshot.stencilFunc, snapshot.stencilRef, snapshot.stencilFuncMask);
+        original.stencilMask(snapshot.stencilWriteMask);
         original.stencilOp(snapshot.stencilFail, snapshot.stencilZFail, snapshot.stencilZPass);
 
         // Restore color state
@@ -729,7 +733,8 @@ export class WebGLStateTracker {
         // Query stencil state
         this.state.stencilFunc = gl.getParameter(gl.STENCIL_FUNC);
         this.state.stencilRef = gl.getParameter(gl.STENCIL_REF);
-        this.state.stencilMask = gl.getParameter(gl.STENCIL_VALUE_MASK);
+        this.state.stencilFuncMask = gl.getParameter(gl.STENCIL_VALUE_MASK);
+        this.state.stencilWriteMask = gl.getParameter(gl.STENCIL_WRITEMASK);
         this.state.stencilFail = gl.getParameter(gl.STENCIL_FAIL);
         this.state.stencilZFail = gl.getParameter(gl.STENCIL_PASS_DEPTH_FAIL);
         this.state.stencilZPass = gl.getParameter(gl.STENCIL_PASS_DEPTH_PASS);

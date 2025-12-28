@@ -14555,7 +14555,8 @@ class WebGLStateTracker {
             depthRange: [0, 1],
             stencilFunc: gl.ALWAYS,
             stencilRef: 0,
-            stencilMask: 0xFFFFFFFF,
+            stencilFuncMask: 0xFFFFFFFF,
+            stencilWriteMask: 0xFFFFFFFF,
             stencilFail: gl.KEEP,
             stencilZFail: gl.KEEP,
             stencilZPass: gl.KEEP,
@@ -14759,11 +14760,11 @@ class WebGLStateTracker {
         gl.stencilFunc = (func, ref, mask) => {
             state.stencilFunc = func;
             state.stencilRef = ref;
-            state.stencilMask = mask;
+            state.stencilFuncMask = mask;
             return original.stencilFunc(func, ref, mask);
         };
         gl.stencilMask = (mask) => {
-            state.stencilMask = mask;
+            state.stencilWriteMask = mask;
             return original.stencilMask(mask);
         };
         gl.stencilOp = (fail, zfail, zpass) => {
@@ -14871,7 +14872,8 @@ class WebGLStateTracker {
             depthRange: [...this.state.depthRange],
             stencilFunc: this.state.stencilFunc,
             stencilRef: this.state.stencilRef,
-            stencilMask: this.state.stencilMask,
+            stencilFuncMask: this.state.stencilFuncMask,
+            stencilWriteMask: this.state.stencilWriteMask,
             stencilFail: this.state.stencilFail,
             stencilZFail: this.state.stencilZFail,
             stencilZPass: this.state.stencilZPass,
@@ -14985,7 +14987,8 @@ class WebGLStateTracker {
         original.depthMask(snapshot.depthMask);
         original.depthRange(...snapshot.depthRange);
         // Restore stencil state
-        original.stencilFunc(snapshot.stencilFunc, snapshot.stencilRef, snapshot.stencilMask);
+        original.stencilFunc(snapshot.stencilFunc, snapshot.stencilRef, snapshot.stencilFuncMask);
+        original.stencilMask(snapshot.stencilWriteMask);
         original.stencilOp(snapshot.stencilFail, snapshot.stencilZFail, snapshot.stencilZPass);
         // Restore color state
         original.colorMask(...snapshot.colorMask);
@@ -15070,7 +15073,8 @@ class WebGLStateTracker {
         // Query stencil state
         this.state.stencilFunc = gl.getParameter(gl.STENCIL_FUNC);
         this.state.stencilRef = gl.getParameter(gl.STENCIL_REF);
-        this.state.stencilMask = gl.getParameter(gl.STENCIL_VALUE_MASK);
+        this.state.stencilFuncMask = gl.getParameter(gl.STENCIL_VALUE_MASK);
+        this.state.stencilWriteMask = gl.getParameter(gl.STENCIL_WRITEMASK);
         this.state.stencilFail = gl.getParameter(gl.STENCIL_FAIL);
         this.state.stencilZFail = gl.getParameter(gl.STENCIL_PASS_DEPTH_FAIL);
         this.state.stencilZPass = gl.getParameter(gl.STENCIL_PASS_DEPTH_PASS);
@@ -15138,18 +15142,16 @@ class GPUResourceCache {
         const tracker = WebGLStateTracker.getInstance();
         if (tracker) {
             this.cachedModelState = tracker.snapshot();
-            // Always check if tracker is in sync with GL reality
+            // Check critical state that C3 might change via cached original methods
             const actualFramebuffer = this.gl.getParameter(this.gl.FRAMEBUFFER_BINDING);
-            const trackerFramebuffer = this.cachedModelState.boundFramebuffer;
-            // Detect mismatch - tracker and GL disagree
-            if (trackerFramebuffer !== actualFramebuffer) {
-                console.warn('[rendera] Tracker out of sync! Tracker FB:', trackerFramebuffer, 'Actual GL FB:', actualFramebuffer);
-                console.warn('[rendera] Triggering full GL state sync...');
-                // Sync the entire tracker state with GL reality
+            const actualProgram = this.gl.getParameter(this.gl.CURRENT_PROGRAM);
+            const trackerState = tracker.getState();
+            // Detect mismatch - tracker and GL disagree on critical state
+            if (trackerState.boundFramebuffer !== actualFramebuffer ||
+                trackerState.currentProgram !== actualProgram) {
+                // Sync and retake snapshot
                 tracker.syncWithGLState();
-                // Take a fresh snapshot with the synced state
                 this.cachedModelState = tracker.snapshot();
-                console.log('[rendera] Resync complete, new snapshot FB:', this.cachedModelState.boundFramebuffer);
             }
             return;
         }

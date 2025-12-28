@@ -40,7 +40,8 @@ export interface WebGLState {
     depthRange: number[];
     stencilFunc: number;
     stencilRef: number;
-    stencilMask: number;
+    stencilFuncMask: number;
+    stencilWriteMask: number;
     stencilFail: number;
     stencilZFail: number;
     stencilZPass: number;

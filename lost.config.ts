@@ -13,7 +13,7 @@ export default defineConfig<'plugin'>({
     category: 'general',
     addonName: 'Rendera',
     addonDescription: 'Rendera is a 3D renderer.',
-    version: '1.8.3',
+    version: '1.8.4',
     author: 'Mikal',
     docsUrl: 'https://kindeyegames.itch.io/rendera',
     helpUrl: {
