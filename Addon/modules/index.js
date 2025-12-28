@@ -18688,6 +18688,8 @@ class InstanceManager {
         this.instances = new Map();
         this.instancesByModel = new Map();
         this.debugShadowMap = false;
+        this.tempMatrix = create$3();
+        this.tempNormalMatrix = create$4();
         // GPU instance data
         this.instanceBuffers = new Map();
         this.nextInstanceId = 1;
@@ -18934,6 +18936,20 @@ class InstanceManager {
         const modelData = this.modelLoader.getModelData(modelId);
         if (!modelData)
             return;
+        const shader = this.defaultShaderProgram;
+        this.gl.useProgram(shader);
+        // Cache uniform locations once per call
+        const viewLoc = this.uniformCache.getLocation(shader, 'u_View');
+        const projectionLoc = this.uniformCache.getLocation(shader, 'u_Projection');
+        const modelLoc = this.uniformCache.getLocation(shader, 'u_Model');
+        const nodeMatrixLoc = this.uniformCache.getLocation(shader, 'u_NodeMatrix');
+        const useSkinningLoc = this.uniformCache.getLocation(shader, 'u_UseSkinning');
+        const tintLoc = this.uniformCache.getLocation(shader, 'u_TintColor');
+        const opacityLoc = this.uniformCache.getLocation(shader, 'u_Opacity');
+        const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
+        // Set view/projection once per frame (same for all instances)
+        this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
+        this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
         for (const instanceId of instanceGroup) {
             const instance = this.instances.get(instanceId);
             if (!instance)
@@ -18942,6 +18958,12 @@ class InstanceManager {
                 continue;
             this.updateWorldMatrix(instance);
             this.gpuResources.setNormalMapEnabled(this.defaultShaderProgram, (_a = instance.renderOptions.useNormalMap) !== null && _a !== void 0 ? _a : false);
+            // Set instance uniforms once per instance
+            this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
+            if (tintLoc !== -1)
+                this.gl.uniform3fv(tintLoc, instance.tintColor);
+            if (opacityLoc !== -1)
+                this.gl.uniform1f(opacityLoc, instance.opacity);
             for (const renderableNode of modelData.renderableNodes) {
                 if (instance.allNodesDisabled)
                     continue;
@@ -18949,52 +18971,35 @@ class InstanceManager {
                 const nodeIdentifier = nodeName || `node_${renderableNode.node.indexData.nodeIndex}`;
                 if (instance.disabledNodes.has(nodeIdentifier))
                     continue;
+                const animationState = instance.animationState;
+                const nodeMatrix = animationState.animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+                // Set node uniforms once per node
+                if (nodeMatrixLoc) {
+                    this.gl.uniformMatrix4fv(nodeMatrixLoc, false, nodeMatrix || InstanceManager.IDENTITY_MATRIX);
+                }
+                let noBoneMatrices = true;
+                const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                    this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
+                    noBoneMatrices = false;
+                }
+                if (useSkinningLoc) {
+                    this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
+                }
+                const finalMatrix = nodeMatrix
+                    ? multiply(this.tempMatrix, instance.worldMatrix, nodeMatrix)
+                    : instance.worldMatrix;
+                normalFromMat4(this.tempNormalMatrix, finalMatrix);
+                if (!nodeMatrix) {
+                    multiply$1(this.tempNormalMatrix, InstanceManager.COORD_CONVERSION, this.tempNormalMatrix);
+                }
+                this.gl.uniformMatrix3fv(normalMatrixLoc, false, this.tempNormalMatrix);
                 const mesh = renderableNode.modelMesh;
                 for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex++) {
                     const primitive = mesh.primitives[primitiveIndex];
                     const primitiveKey = `${renderableNode.node.indexData.nodeIndex}_${primitiveIndex}`;
                     const materialIndex = (_b = instance.materialOverrides.get(primitiveKey)) !== null && _b !== void 0 ? _b : primitive.material;
-                    const shader = this.defaultShaderProgram;
                     this.gl.bindVertexArray(primitive.vao);
-                    const viewLoc = this.uniformCache.getLocation(shader, 'u_View');
-                    const projectionLoc = this.uniformCache.getLocation(shader, 'u_Projection');
-                    const modelLoc = this.uniformCache.getLocation(shader, 'u_Model');
-                    const nodeMatrixLoc = this.uniformCache.getLocation(shader, 'u_NodeMatrix');
-                    const useSkinningLoc = this.uniformCache.getLocation(shader, 'u_UseSkinning');
-                    this.gl.uniformMatrix4fv(viewLoc, false, viewProjection.view);
-                    this.gl.uniformMatrix4fv(projectionLoc, false, viewProjection.projection);
-                    this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
-                    const tintLoc = this.uniformCache.getLocation(shader, 'u_TintColor');
-                    const opacityLoc = this.uniformCache.getLocation(shader, 'u_Opacity');
-                    if (tintLoc !== -1)
-                        this.gl.uniform3fv(tintLoc, instance.tintColor);
-                    if (opacityLoc !== -1)
-                        this.gl.uniform1f(opacityLoc, instance.opacity);
-                    const animationState = instance.animationState;
-                    const nodeMatrix = animationState.animationMatrices.get(renderableNode.node.indexData.nodeIndex);
-                    if (nodeMatrixLoc) {
-                        this.gl.uniformMatrix4fv(nodeMatrixLoc, false, nodeMatrix || create$3());
-                    }
-                    let noBoneMatrices = true;
-                    const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
-                    if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
-                        this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
-                        noBoneMatrices = false;
-                    }
-                    if (useSkinningLoc) {
-                        this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
-                    }
-                    const finalMatrix = nodeMatrix
-                        ? multiply(create$3(), instance.worldMatrix, nodeMatrix)
-                        : instance.worldMatrix;
-                    const normalMatrix = create$4();
-                    normalFromMat4(normalMatrix, finalMatrix);
-                    if (!nodeMatrix) {
-                        const coordConversion = fromValues$2(1, 0, 0, 0, -1, 0, 0, 0, -1);
-                        multiply$1(normalMatrix, coordConversion, normalMatrix);
-                    }
-                    const normalMatrixLoc = this.uniformCache.getLocation(shader, 'u_NormalMatrix');
-                    this.gl.uniformMatrix3fv(normalMatrixLoc, false, normalMatrix);
                     this.gpuResources.bindShaderAndMaterial(this.defaultShaderProgram, materialIndex, modelData);
                     this.gl.frontFace(this.gl.CW);
                     if (primitive.indexBuffer) {
@@ -19014,6 +19019,14 @@ class InstanceManager {
             return;
         const shadowShader = this.shadowMapShader;
         this.gl.useProgram(shadowShader);
+        // Cache uniform locations once per call
+        const viewProjLoc = this.uniformCache.getLocation(shadowShader, 'u_LightViewProjection');
+        const modelLoc = this.uniformCache.getLocation(shadowShader, 'u_Model');
+        const nodeMatrixLoc = this.uniformCache.getLocation(shadowShader, 'u_NodeMatrix');
+        const useSkinningLoc = this.uniformCache.getLocation(shadowShader, 'u_UseSkinning');
+        // Compute and set light view projection once per call
+        multiply(this.tempMatrix, viewProjection.projection, viewProjection.view);
+        this.gl.uniformMatrix4fv(viewProjLoc, false, this.tempMatrix);
         for (const instanceId of instanceGroup) {
             const instance = this.instances.get(instanceId);
             if (!instance)
@@ -19021,6 +19034,8 @@ class InstanceManager {
             if (!this.isInstanceVisible(instance, modelData))
                 continue;
             this.updateWorldMatrix(instance);
+            // Set model matrix once per instance
+            this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
             for (const renderableNode of modelData.renderableNodes) {
                 if (instance.allNodesDisabled)
                     continue;
@@ -19028,31 +19043,24 @@ class InstanceManager {
                 const nodeIdentifier = nodeName || `node_${renderableNode.node.indexData.nodeIndex}`;
                 if (instance.disabledNodes.has(nodeIdentifier))
                     continue;
+                const animationState = instance.animationState;
+                const animationMatrix = animationState.animationMatrices.get(renderableNode.node.indexData.nodeIndex);
+                // Set node uniforms once per node
+                if (nodeMatrixLoc) {
+                    this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix || InstanceManager.IDENTITY_MATRIX);
+                }
+                let noBoneMatrices = true;
+                const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
+                if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
+                    this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
+                    noBoneMatrices = false;
+                }
+                if (useSkinningLoc) {
+                    this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
+                }
                 const mesh = renderableNode.modelMesh;
                 for (const primitive of mesh.primitives) {
                     this.gl.bindVertexArray(primitive.vao);
-                    const viewProjLoc = this.uniformCache.getLocation(shadowShader, 'u_LightViewProjection');
-                    const modelLoc = this.uniformCache.getLocation(shadowShader, 'u_Model');
-                    const nodeMatrixLoc = this.uniformCache.getLocation(shadowShader, 'u_NodeMatrix');
-                    const useSkinningLoc = this.uniformCache.getLocation(shadowShader, 'u_UseSkinning');
-                    const lightViewProj = multiply(create$3(), viewProjection.projection, viewProjection.view);
-                    this.gl.uniformMatrix4fv(viewProjLoc, false, lightViewProj);
-                    this.gl.uniformMatrix4fv(modelLoc, false, instance.worldMatrix);
-                    const animationState = instance.animationState;
-                    const animationMatrices = animationState.animationMatrices;
-                    const animationMatrix = animationMatrices.get(renderableNode.node.indexData.nodeIndex);
-                    if (nodeMatrixLoc) {
-                        this.gl.uniformMatrix4fv(nodeMatrixLoc, false, animationMatrix || create$3());
-                    }
-                    let noBoneMatrices = true;
-                    const nodeBoneMatrices = animationState.boneMatrices.get(renderableNode.node.indexData.nodeIndex);
-                    if (nodeBoneMatrices && nodeBoneMatrices.length > 0) {
-                        this.gpuResources.updateBoneUBO(nodeBoneMatrices, nodeBoneMatrices.length / 16);
-                        noBoneMatrices = false;
-                    }
-                    if (useSkinningLoc) {
-                        this.gl.uniform1i(useSkinningLoc, renderableNode.useSkinning && !noBoneMatrices ? 1 : 0);
-                    }
                     this.gl.frontFace(this.gl.CW);
                     if (primitive.indexBuffer) {
                         this.gl.drawElements(this.gl.TRIANGLES, primitive.indexCount, primitive.indexType, 0);
@@ -19309,6 +19317,9 @@ class InstanceManager {
         return this.instances.size > 0;
     }
 }
+// Reusable matrices to avoid allocations in render loop
+InstanceManager.IDENTITY_MATRIX = create$3();
+InstanceManager.COORD_CONVERSION = fromValues$2(1, 0, 0, 0, -1, 0, 0, 0, -1);
 // @ts-ignore
 globalThis.InstanceManager = InstanceManager;
 

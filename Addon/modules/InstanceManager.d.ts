@@ -15,6 +15,10 @@ export declare class InstanceManager implements IInstanceManager {
     private shadowMapManager;
     debugShadowMap: boolean;
     private uniformCache;
+    private static readonly IDENTITY_MATRIX;
+    private static readonly COORD_CONVERSION;
+    private readonly tempMatrix;
+    private readonly tempNormalMatrix;
     private instanceBuffers;
     private nextInstanceId;
     private dirtyInstances;
